@@ -1,0 +1,1 @@
+void Error(char *msg);

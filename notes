@@ -1,0 +1,27 @@
+-- Grammar
+EoF
+IDENTIFIER
+INT
+STRING
+ERRONEOUS
+one character tokens
+two character operators
+
+-- Operators
++ - * /
+( ) { } [ ]
+= += -= *= /=
+== !=
+, . ;
+
+-- Reserved keywords
+int
+string
+
+if
+else
+print
+
+-- Example
+int num = 5;
+string s = "Hello World!"
