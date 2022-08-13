@@ -70,7 +70,10 @@ static void handle_operator()
 					break;
 				default:
 					ungetch();
-					Token.class = current;
+					if (current == '=') {
+						Token.class = ONE_CHAR_ASSIGNMENT;
+					}
+					// handle single '!'
 					break;
 			}
 			break;
@@ -86,9 +89,38 @@ static void handle_operator()
 					break;
 				default:
 					ungetch();
-					Token.class = current;
+					Token.class = BINARY_ARITH;
 					break;
 			}
+			break;
+		default:
+			Token.class = current;
+			break;
+	}
+}
+
+static void handle_separator()
+{
+	switch (current)
+	{
+		case '(':
+		case '{':
+		case '[':
+			Token.class = OPEN_BRACE;
+			break;
+		case ')':
+		case '}':
+		case ']':
+			Token.class = CLOSE_BRACE;
+			break;
+		case '.':
+			Token.class = DOT;
+			break;
+		case ',':
+			Token.class = COMMA;
+			break;
+		case ';':
+			Token.class = SEMICOLON;
 			break;
 		default:
 			Token.class = current;
@@ -131,7 +163,7 @@ void get_next_token()
 				next_char();
 			} else {
 				if (is_separator(current)) {
-					Token.class = current;
+					handle_separator();
 					next_char();
 				} else {
 					if (is_operator(current)) {

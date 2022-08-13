@@ -27,10 +27,24 @@ int main(int argc, char **argv)
 					  return 0;
 				case ERRONEOUS: printf("Erroneous token: %s\n", Token.repr);
 						break;
-				case TWO_CHAR_ASSIGNMENT: printf("Two-char assignment: %s\n", Token.repr);
+				case ONE_CHAR_ASSIGNMENT: printf("Single-char assignment operator: %s\n", Token.repr);
 							  break;
-				case TWO_CHAR_COMPARE: printf("Two-char compare: %s\n", Token.repr);
+				case BINARY_ARITH: printf("Binary arithmetic operator: %s\n", Token.repr);
+						   break;
+				case TWO_CHAR_ASSIGNMENT: printf("Two-char assignment operator: %s\n", Token.repr);
+							  break;
+				case TWO_CHAR_COMPARE: printf("Two-char compare operator: %s\n", Token.repr);
 						       break;
+				case DOT: printf("Dot separator: %s\n", Token.repr);
+					  break;
+				case COMMA: printf("Comma separator: %s\n", Token.repr);
+					    break;
+				case SEMICOLON: printf("Semicolon separator: %s\n", Token.repr);
+						break;
+				case OPEN_BRACE: printf("Open brace: %s\n", Token.repr);
+					       break;
+				case CLOSE_BRACE: printf("Closed brace: %s\n", Token.repr);
+						break;
 				default: printf("Single-char Operator or separator: %s\n", Token.repr);
 					 break;
 			}
