@@ -3,15 +3,20 @@ s = ""
 for i in range(256):
 	if i % 10 == 0:
 		s += "\n"
-	if i in [42, 43, 45, 47, 61]:					# Operator
+	# Operator
+	if i in [33, 42, 43, 45, 47, 61]:
 		s += "0020, "
-	elif i in [40, 41, 44, 46, 59, 91, 93, 123, 125]:		# Separator
+	# Separator
+	elif i in [40, 41, 44, 46, 59, 91, 93, 123, 125]:
 		s += "0040, "
-	elif i in range(48, 58):						# Digits
+	# Digits
+	elif i in range(48, 58):
 		s += "0010, "
-	elif i in range(65, 91):						# Upper case letters
+	# Upper case letters
+	elif i in range(65, 91):
 		s += "0002, "
-	elif i in range(97, 123):						# Lower case letters
+	# Lower case letters
+	elif i in range(97, 123):
 		s += "0004, "
 	else:
 		if i < 255:

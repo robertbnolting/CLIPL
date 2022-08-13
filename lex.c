@@ -9,7 +9,8 @@ static char *input;
 static int pos;
 static char current;
 
-#define next_char() (current = input[++pos])
+#define next_char()	(current = input[++pos])
+#define ungetch()	(current = input[--pos])
 
 Token_type Token;
 
@@ -55,6 +56,46 @@ static void handle_string()
 	Token.class = STRING;
 }
 
+static void handle_operator()
+{
+	switch (current)
+	{
+		case '=':
+		case '!':
+			next_char();
+			switch (current)
+			{
+				case '=':
+					Token.class = TWO_CHAR_COMPARE;
+					break;
+				default:
+					ungetch();
+					Token.class = current;
+					break;
+			}
+			break;
+		case '+':
+		case '-':
+		case '*':
+		case '/':
+			next_char();
+			switch (current)
+			{
+				case '=':
+					Token.class = TWO_CHAR_ASSIGNMENT;
+					break;
+				default:
+					ungetch();
+					Token.class = current;
+					break;
+			}
+			break;
+		default:
+			Token.class = current;
+			break;
+	}
+}
+
 static void skip_layout_and_comments()
 {
 	while (is_layout(current)) { next_char(); }
@@ -89,12 +130,17 @@ void get_next_token()
 				handle_string();
 				next_char();
 			} else {
-				if (is_operator(current) || is_separator(current)) {
+				if (is_separator(current)) {
 					Token.class = current;
 					next_char();
 				} else {
-					Token.class = ERRONEOUS;
-					next_char();
+					if (is_operator(current)) {
+						handle_operator();
+						next_char();
+					} else {
+						Token.class = ERRONEOUS;
+						next_char();
+					}
 				}
 			}
 		}

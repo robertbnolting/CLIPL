@@ -27,7 +27,11 @@ int main(int argc, char **argv)
 					  return 0;
 				case ERRONEOUS: printf("Erroneous token: %s\n", Token.repr);
 						break;
-				default: printf("Operator or separator: %s\n", Token.repr);
+				case TWO_CHAR_ASSIGNMENT: printf("Two-char assignment: %s\n", Token.repr);
+							  break;
+				case TWO_CHAR_COMPARE: printf("Two-char compare: %s\n", Token.repr);
+						       break;
+				default: printf("Single-char Operator or separator: %s\n", Token.repr);
 					 break;
 			}
 

@@ -25,3 +25,6 @@ print
 -- Example
 int num = 5;
 string s = "Hello World!"
+
+-- TODO
+split 'single-char operator or separator' into separate Token types
