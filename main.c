@@ -21,6 +21,8 @@ int main(int argc, char **argv)
 						 break;
 				case INT: printf("Integer: %s\n", Token.repr);
 					  break;
+				case FLOAT: printf("Float: %s\n", Token.repr);
+					    break;
 				case STRING: printf("String: %s\n", Token.repr);
 					     break;
 				case EoF: printf("EoF: %s\n", Token.repr);

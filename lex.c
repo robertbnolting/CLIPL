@@ -11,6 +11,7 @@ static char current;
 
 #define next_char()	(current = input[++pos])
 #define ungetch()	(current = input[--pos])
+#define peek()		(input[pos+1])
 
 Token_type Token;
 
@@ -38,16 +39,25 @@ static void handle_identifier()
 	Token.class = IDENTIFIER;
 }
 
-static void handle_integer()
+static void handle_number()
 {
-	while (is_digit(current)) { next_char(); }
-	Token.class = INT;
+	while (is_digit(current) || (current == '.' && Token.class != FLOAT)) {
+		if (current == '.') {
+			Token.class = FLOAT;
+		}
+		next_char();
+	}
+	if (Token.class != FLOAT) {
+		Token.class = INT;
+	}
 }
 
 static void handle_string()
 {
 	next_char();
-	while (current != '"') {
+	char last;
+	while (!(current == '"' && last != '\\')) {
+		last = current;
 		next_char();
 		if (is_end_of_file(current)) {
 			Error("Missing \"");
@@ -114,7 +124,15 @@ static void handle_separator()
 			Token.class = CLOSE_BRACE;
 			break;
 		case '.':
-			Token.class = DOT;
+			if (is_digit(peek())) {
+				do {
+					next_char();
+				} while (is_digit(current));
+				ungetch();
+				Token.class = FLOAT;
+			} else {
+				Token.class = DOT;
+			}
 			break;
 		case ',':
 			Token.class = COMMA;
@@ -156,7 +174,7 @@ void get_next_token()
 		handle_identifier();
 	} else {
 		if (is_digit(current)) {
-			handle_integer();
+			handle_number();
 		} else {
 			if (current == '"') {
 				handle_string();

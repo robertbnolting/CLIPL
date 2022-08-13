@@ -3,6 +3,7 @@ enum {
 	EoF,
 	IDENTIFIER,
 	INT,
+	FLOAT,
 	STRING,
 	BINARY_ARITH,
 	OPEN_BRACE,
