@@ -27,4 +27,12 @@ int num = 5;
 string s = "Hello World!"
 
 -- TODO
-split 'single-char operator or separator' into separate Token types
+
+-- Speed benchmarks of lexical analyzer
+100 lines (274 bytes) --> 0.005s
+1000 lines --> 0.042s
+10000 lines --> 0.354s
+100000 lines --> 4.589s
+1000000 lines --> 44.095s
+
+f(x) = 4e-5 * x [+-12%] for this segment (maybe exponential with even bigger files)
