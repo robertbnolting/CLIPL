@@ -39,6 +39,7 @@ enum {
 
 #define is_base_letter(ch)	(current == 'x' || current == 'X' || current == 'o' || current == 'O' || current == 'b' || current == 'B')
 
+#define is_hex_letter(ch)	((ch >= 'A' && ch <= 'F') || (ch >= 'a' && ch <= 'f'))
 
 static const char charbits[256] = {
 	0000, 0000, 0000, 0000, 0000, 0000, 0000, 0000, 0000, 0000, 

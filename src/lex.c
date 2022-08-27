@@ -40,13 +40,54 @@ static void handle_identifier()
 	Token.class = IDENTIFIER;
 }
 
+static void handle_hex()
+{
+	while (is_digit(current) || is_hex_letter(current)) {
+		next_char();
+	}
+
+	Token.class = INT;
+}
+
+static void handle_oct()
+{
+	while (current >= '0' && current <= '7') {
+		next_char();
+	}
+
+	Token.class = INT;
+}
+
+static void handle_bin()
+{
+	while (current == '0' || current == '1') {
+		next_char();
+	}
+
+	Token.class = INT;
+}
+
 static void handle_number()
 {
 	while (is_digit(current) || (current == '.' && Token.class != FLOAT) ||
-	       (is_base_letter(current) && prev() == '0' && is_digit(peek()))) {
+	       (is_base_letter(current) && prev() == '0')) {
 		if (current == '.') {
 			Token.class = FLOAT;
 		}
+		if (current == 'x' || current == 'X') {
+			next_char();
+			handle_hex();
+			break;
+		} else if (current == 'o' || current == 'O') {
+			next_char();
+			handle_oct();
+			break;
+		} else if (current == 'b' || current == 'B') {
+			next_char();
+			handle_bin();
+			break;
+		}
+
 		next_char();
 	}
 	if (Token.class != FLOAT) {
