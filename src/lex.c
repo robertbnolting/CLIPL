@@ -12,6 +12,7 @@ static char current;
 #define next_char()	(current = input[++pos])
 #define ungetch()	(current = input[--pos])
 #define peek()		(input[pos+1])
+#define prev()		(input[pos-1])
 
 Token_type Token;
 
@@ -41,7 +42,8 @@ static void handle_identifier()
 
 static void handle_number()
 {
-	while (is_digit(current) || (current == '.' && Token.class != FLOAT)) {
+	while (is_digit(current) || (current == '.' && Token.class != FLOAT) ||
+	       (is_base_letter(current) && prev() == '0' && is_digit(peek()))) {
 		if (current == '.') {
 			Token.class = FLOAT;
 		}

@@ -37,6 +37,9 @@ enum {
 #define is_operator(ch)		(get_bits(ch) & OPERATOR_MASK)
 #define is_separator(ch)	(get_bits(ch) & SEPARATOR_MASK)
 
+#define is_base_letter(ch)	(current == 'x' || current == 'X' || current == 'o' || current == 'O' || current == 'b' || current == 'B')
+
+
 static const char charbits[256] = {
 	0000, 0000, 0000, 0000, 0000, 0000, 0000, 0000, 0000, 0000, 
 	0000, 0000, 0000, 0000, 0000, 0000, 0000, 0000, 0000, 0000, 
