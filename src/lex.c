@@ -70,7 +70,7 @@ static void handle_bin()
 static void handle_number()
 {
 	while (is_digit(current) || (current == '.' && Token.class != FLOAT) ||
-	       (is_base_letter(current) && prev() == '0')) {
+	       (is_base_prefix(current) && prev() == '0')) {
 		if (current == '.') {
 			Token.class = FLOAT;
 		}

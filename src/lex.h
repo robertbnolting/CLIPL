@@ -37,7 +37,7 @@ enum {
 #define is_operator(ch)		(get_bits(ch) & OPERATOR_MASK)
 #define is_separator(ch)	(get_bits(ch) & SEPARATOR_MASK)
 
-#define is_base_letter(ch)	(current == 'x' || current == 'X' || current == 'o' || current == 'O' || current == 'b' || current == 'B')
+#define is_base_prefix(ch)	(current == 'x' || current == 'X' || current == 'o' || current == 'O' || current == 'b' || current == 'B')
 
 #define is_hex_letter(ch)	((ch >= 'A' && ch <= 'F') || (ch >= 'a' && ch <= 'f'))
 

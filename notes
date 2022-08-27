@@ -10,9 +10,9 @@ two character operators
 -- Numerals
 int of base:
 10 -- 5
-2 -- 1001b 0b1001
-8 -- 75o 0o75
-16 -- a32h 0xa32
+2 -- 0b1001
+8 -- 0o75
+16 -- 0xa32
 
 --> get instantly converted in lexical analyzer
 
