@@ -1,8 +1,7 @@
 enum {
 	ERRONEOUS = 256,
 	EoF,
-	IDENTIFIER,
-	INT,
+	IDENTIFIER, INT,
 	FLOAT,
 	STRING,
 	BINARY_ARITH,
@@ -87,7 +86,8 @@ typedef struct
 
 extern Token_type Token;
 
-void start_lexer();
-void get_next_token();
+extern Token_type *Token_stream;
+extern size_t Token_stream_size;
 
-static void skip_layout_and_comments();
+void lexer_init();
+void get_next_token();

@@ -16,11 +16,17 @@ static char current;
 
 Token_type Token;
 
-void start_lexer(char *file_contents)
+Token_type *Token_stream;
+size_t Token_stream_size;
+
+void lexer_init(char *file_contents)
 {
 	input = file_contents;
 	pos = 0;
 	current = input[pos];
+
+	Token_stream = (Token_type *) malloc(1);
+	Token_stream_size = 0;
 }
 
 static char *to_zstring(int start, int len)
@@ -242,4 +248,10 @@ void get_next_token()
 	}
 
 	Token.repr = to_zstring(startpos, pos - startpos);
+
+	Token_stream = realloc(Token_stream, sizeof(Token_type) * (Token_stream_size+1));
+	Token_stream[Token_stream_size].class = Token.class;
+	Token_stream[Token_stream_size].repr = (char *) malloc(pos - startpos);
+	strcpy(Token_stream[Token_stream_size].repr, Token.repr);
+	Token_stream_size++;
 }

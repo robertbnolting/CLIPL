@@ -3,7 +3,12 @@
 
 #include "readfile.h"
 #include "lex.h"
+#include "parse.h"
 #include "error.h"
+
+#define ENABLE_LEX_OUTPUT 0
+
+
 
 int main(int argc, char **argv)
 {
@@ -11,10 +16,11 @@ int main(int argc, char **argv)
 		char *filename = argv[1];
 
 		char *input = readFile(filename);
-		start_lexer(input);
+		lexer_init(input);
 
 		do {
 			get_next_token();
+#if ENABLE_LEX_OUTPUT
 			switch (Token.class)
 			{
 				case IDENTIFIER: printf("Identifier: %s\n", Token.repr);
@@ -51,8 +57,16 @@ int main(int argc, char **argv)
 					 break;
 			}
 
-			free(Token.repr);
+#endif
+			if (Token.class != EoF)
+				free(Token.repr);
 		} while (Token.class != EoF);
+
+		for (int i = 0; i < Token_stream_size; i++) {
+			printf("%s\n", Token_stream[i].repr);
+		}
+
+		//start_parser();
 
 		return 0;
 	}
