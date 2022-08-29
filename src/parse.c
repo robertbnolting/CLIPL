@@ -1,14 +1,21 @@
 #include <stdlib.h>
+#include <stdio.h>
 
 #include "parse.h"
 #include "lex.h"
 
 static int pos;
 
-#define get()	(&token_stream[pos])
-#define next()	(&token_stream[pos++])
-#define peek()	(&token_stream[pos+1])
-#define prev()	(&token_stream[pos-1])
+#define get()	(&Token_stream[pos])
+#define next()	(&Token_stream[pos++])
+#define peek()	(&Token_stream[pos+1])
+#define prev()	(&Token_stream[pos-1])
+
+static void expect();
+static int next_token();
+static void parse();
+static void read_int();
+static void read_arithmetic_expr();
 
 void parser_init()
 {
@@ -19,7 +26,7 @@ void parser_init()
 
 static void expect(int tclass)
 {
-	Token *t = get();
+	Token_type *t = get();
 	if (t->class != tclass) {
 		printf("Error: Unexpected token.\n");
 	}
@@ -27,7 +34,7 @@ static void expect(int tclass)
 
 static int next_token(int tclass)
 {
-	Token *t = get();
+	Token_type *t = get();
 	if (t->class == tclass) {
 		return 1;
 	} else {
@@ -37,9 +44,9 @@ static int next_token(int tclass)
 
 static void parse()
 {
-	Token *start = get();
+	Token_type *start = get();
 
-	switch (start.class)
+	switch (start->class)
 	{
 		case EoF:
 			return;
@@ -51,13 +58,15 @@ static void parse()
 
 static void read_int()
 {
-	Token *t = next();
+	Token_type *t = next();
 
-	if (t->class == BINARY_ARITH) {
+	if (t->class == '+' || t->class == '-' ||
+	    t->class == '*' || t->class == '/') 
+	{
 		read_arithmetic_expr();
-	} else if (t->class == SEMICOLON) {
-	} else if (t->class == COMMA) {
-	} else if (t->class == CLOSE_BRACE) {
+	} else if (t->class == ';') {
+	} else if (t->class == ',') {
+	} else if (t->class == ')') {
 	} else if (t->class == TWO_CHAR_COMPARE) {
 	} else {
 		printf("Error: Unexpected token.\n");
@@ -66,5 +75,5 @@ static void read_int()
 
 static void read_arithmetic_expr()
 {
-	Token *t = get();
+	Token_type *t = get();
 }

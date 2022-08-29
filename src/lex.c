@@ -132,7 +132,7 @@ static void handle_operator()
 				default:
 					ungetch();
 					if (current == '=') {
-						Token.class = ONE_CHAR_ASSIGNMENT;
+						Token.class = current;
 					}
 					// handle single '!'
 					break;
@@ -150,7 +150,7 @@ static void handle_operator()
 					break;
 				default:
 					ungetch();
-					Token.class = BINARY_ARITH;
+					Token.class = current;
 					break;
 			}
 			break;
@@ -164,16 +164,6 @@ static void handle_separator()
 {
 	switch (current)
 	{
-		case '(':
-		case '{':
-		case '[':
-			Token.class = OPEN_BRACE;
-			break;
-		case ')':
-		case '}':
-		case ']':
-			Token.class = CLOSE_BRACE;
-			break;
 		case '.':
 			if (is_digit(peek())) {
 				do {
@@ -182,14 +172,8 @@ static void handle_separator()
 				ungetch();
 				Token.class = FLOAT;
 			} else {
-				Token.class = DOT;
+				Token.class = current;
 			}
-			break;
-		case ',':
-			Token.class = COMMA;
-			break;
-		case ';':
-			Token.class = SEMICOLON;
 			break;
 		default:
 			Token.class = current;
