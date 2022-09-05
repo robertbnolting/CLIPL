@@ -9,6 +9,7 @@ enum {
 	AST_VOID,
 	AST_IDENT,
 	AST_INT,
+	AST_STRING,
 	AST_ADD,
 	AST_SUB,
 	AST_MUL,

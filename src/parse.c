@@ -24,6 +24,7 @@ static Node *read_assignment_expr();
 static Node *read_additive_expr();
 static Node *read_multiplicative_expr();
 static Node *read_int();
+static Node *read_string();
 static Node *read_ident();
 
 static void traverse();
@@ -44,6 +45,9 @@ static void traverse(Node *root)
 	{
 		case AST_INT:
 			printf("(INT: %d) ", root->ival);
+			break;
+		case AST_STRING:
+			printf("(STRING: %s) ", root->sval);
 			break;
 		case AST_IDENT:
 			printf("(IDENT: %s) ", root->name);
@@ -95,6 +99,11 @@ static Node *ast_identtype(char *n)
 	return makeNode(&(Node){AST_IDENT, .name = n});
 }
 
+static Node *ast_stringtype(char *val)
+{
+	return makeNode(&(Node){AST_STRING, .sval = val});
+}
+
 static Node *ast_binop(int op, Node *lhs, Node *rhs)
 {
 	switch (op)
@@ -140,6 +149,7 @@ static Node *read_primary_expr()
 	switch (tok->class) {
 		case INT: return read_int(tok);
 		case IDENTIFIER: return read_ident(tok);
+		case STRING: return read_string(tok);
 		default: return NULL;
 	}
 }
@@ -203,6 +213,14 @@ static Node *read_int(Token_type *tok)
 	long v = strncasecmp(s, "0b", 2) ? strtol(s, &end, 0) : strtol(s, &end, 2);
 
 	return ast_inttype(v);
+}
+
+static Node *read_string(Token_type *tok)
+{
+	char *s = (char *) malloc(strlen(tok->repr));
+	strcpy(s, tok->repr);
+
+	return ast_stringtype(s);
 }
 
 static Node *read_ident(Token_type *tok)
