@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 #include <strings.h>
 
 #include "parse.h"
@@ -23,6 +24,7 @@ static Node *read_assignment_expr();
 static Node *read_additive_expr();
 static Node *read_multiplicative_expr();
 static Node *read_int();
+static Node *read_ident();
 
 static void traverse();
 
@@ -42,6 +44,9 @@ static void traverse(Node *root)
 	{
 		case AST_INT:
 			printf("%d", root->ival);
+			break;
+		case AST_IDENT:
+			printf("%s", root->name);
 			break;
 		case AST_ADD:
 			traverse(root->left);
@@ -63,6 +68,11 @@ static void traverse(Node *root)
 			printf(" / ");
 			traverse(root->right);
 			break;
+		case AST_ASSIGN:
+			traverse(root->left);
+			printf(" = ");
+			traverse(root->right);
+			break;
 	}
 }
 
@@ -80,6 +90,11 @@ static Node *ast_inttype(int val)
 	return makeNode(&(Node){AST_INT, .ival = val});
 }
 
+static Node *ast_identtype(char *n)
+{
+	return makeNode(&(Node){AST_IDENT, .name = n});
+}
+
 static Node *ast_binop(int op, Node *lhs, Node *rhs)
 {
 	switch (op)
@@ -92,6 +107,8 @@ static Node *ast_binop(int op, Node *lhs, Node *rhs)
 			return makeNode(&(Node){AST_MUL, .left=lhs, .right=rhs});
 		case '/':
 			return makeNode(&(Node){AST_DIV, .left=lhs, .right=rhs});
+		case '=':
+			return makeNode(&(Node){AST_ASSIGN, .left=lhs, .right=rhs});
 		default:
 			return NULL;
 	}
@@ -122,9 +139,9 @@ static Node *read_primary_expr()
 
 	switch (tok->class) {
 		case INT: return read_int(tok);
+		case IDENTIFIER: return read_ident(tok);
 		default: return NULL;
 	}
-
 }
 
 static Node *read_expr()
@@ -137,6 +154,11 @@ static Node *read_expr()
 static Node *read_assignment_expr()
 {
 	Node *r = read_additive_expr();
+
+	if (curr()->class == '=') {
+		pos++;
+		r = ast_binop('=', r, read_assignment_expr());
+	}
 
 	return r;
 }
@@ -181,6 +203,14 @@ static Node *read_int(Token_type *tok)
 	long v = strncasecmp(s, "0b", 2) ? strtol(s, &end, 0) : strtol(s, &end, 2);
 
 	return ast_inttype(v);
+}
+
+static Node *read_ident(Token_type *tok)
+{
+	char *s = (char *) malloc(strlen(tok->repr));
+	strcpy(s, tok->repr);
+
+	return ast_identtype(s);
 }
 
 static int eval_intexpr(Node *Node)

@@ -7,11 +7,13 @@ enum {
 
 enum {
 	AST_VOID,
+	AST_IDENT,
 	AST_INT,
 	AST_ADD,
 	AST_SUB,
 	AST_MUL,
-	AST_DIV
+	AST_DIV,
+	AST_ASSIGN,
 };
 
 typedef struct Node {
@@ -23,6 +25,8 @@ typedef struct Node {
 		float fval;
 		// string
 		char *sval;
+		// identifier
+		char *name;
 		// binary operator
 		struct {
 			struct Node *left;
