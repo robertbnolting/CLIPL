@@ -62,11 +62,13 @@ int main(int argc, char **argv)
 				free(Token.repr);
 		} while (Token.class != EoF);
 
+		/*
 		for (int i = 0; i < Token_stream_size; i++) {
 			printf("%s\n", Token_stream[i].repr);
 		}
+		*/
 
-		//start_parser();
+		parser_init();
 
 		return 0;
 	}

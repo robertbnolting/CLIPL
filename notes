@@ -14,8 +14,6 @@ int of base:
 8 -- 0o75
 16 -- 0xa32
 
---> get instantly converted in lexical analyzer
-
 -- Operators
 + - * /
 ( ) { } [ ]
@@ -33,7 +31,7 @@ print
 
 -- Example
 int num = 5;
-string s = "Hello World!"
+string s = "Hello World!";
 
 -- TODO
 
@@ -44,4 +42,4 @@ string s = "Hello World!"
 100000 lines --> 4.589s
 1000000 lines --> 44.095s
 
-f(x) = 4e-5 * x [+-12%] for this segment (maybe exponential with even bigger files)
+f(x) = 4e-5 * x [+-12%] for this segment
