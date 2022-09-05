@@ -43,34 +43,34 @@ static void traverse(Node *root)
 	switch (root->type)
 	{
 		case AST_INT:
-			printf("%d", root->ival);
+			printf("(INT: %d) ", root->ival);
 			break;
 		case AST_IDENT:
-			printf("%s", root->name);
+			printf("(IDENT: %s) ", root->name);
 			break;
 		case AST_ADD:
 			traverse(root->left);
-			printf(" + ");
+			printf("(ADD: +) ");
 			traverse(root->right);
 			break;
 		case AST_SUB:
 			traverse(root->left);
-			printf(" - ");
+			printf("(SUB: -) ");
 			traverse(root->right);
 			break;
 		case AST_MUL:
 			traverse(root->left);
-			printf(" * ");
+			printf("(MUL: *) ");
 			traverse(root->right);
 			break;
 		case AST_DIV:
 			traverse(root->left);
-			printf(" / ");
+			printf("(DIV: /) ");
 			traverse(root->right);
 			break;
 		case AST_ASSIGN:
 			traverse(root->left);
-			printf(" = ");
+			printf("(ASSIGN: =) ");
 			traverse(root->right);
 			break;
 	}
