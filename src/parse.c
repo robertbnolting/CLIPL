@@ -14,8 +14,6 @@ static int pos;
 #define peek()	(&Token_stream[pos+1])
 #define prev()	(&Token_stream[pos-1])
 
-#define is_arithtype(t)	(AST_ADD <= t && t <= AST_DIV)
-
 static int expect();
 
 static Node *read_primary_expr();
@@ -229,21 +227,4 @@ static Node *read_ident(Token_type *tok)
 	strcpy(s, tok->repr);
 
 	return ast_identtype(s);
-}
-
-static int eval_intexpr(Node *Node)
-{
-	switch (Node->type)
-	{
-		case TYPE_INT: return Node->ival;
-#define L (eval_intexpr(Node->left))
-#define R (eval_intexpr(Node->right))
-		case '+': return L + R;
-		case '-': return L - R;
-		case '*': return L * R;
-		case '/': return L / R;
-#undef L
-#undef R
-		default: return 0;
-	}
 }
