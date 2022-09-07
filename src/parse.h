@@ -15,6 +15,7 @@ enum {
 	AST_MUL,
 	AST_DIV,
 	AST_ASSIGN,
+	AST_FUNCTION,
 };
 
 typedef struct Node {
@@ -32,6 +33,13 @@ typedef struct Node {
 		struct {
 			struct Node *left;
 			struct Node *right;
+		};
+		// function
+		struct {
+			char *flabel;
+			size_t n_params;
+			struct Node **fnparams;
+			struct Node *fnbody;
 		};
 	};
 } Node;

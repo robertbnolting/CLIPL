@@ -203,28 +203,28 @@ void get_next_token()
 	if (is_end_of_file(current)) {
 		Token.class = EoF;
 		Token.repr  = "<EOF>";
-		return;
-	}
-	if (is_letter(current)) {
-		handle_identifier();
 	} else {
-		if (is_digit(current)) {
-			handle_number();
+		if (is_letter(current)) {
+			handle_identifier();
 		} else {
-			if (current == '"') {
-				handle_string();
-				next_char();
+			if (is_digit(current)) {
+				handle_number();
 			} else {
-				if (is_separator(current)) {
-					handle_separator();
+				if (current == '"') {
+					handle_string();
 					next_char();
 				} else {
-					if (is_operator(current)) {
-						handle_operator();
+					if (is_separator(current)) {
+						handle_separator();
 						next_char();
 					} else {
-						Token.class = ERRONEOUS;
-						next_char();
+						if (is_operator(current)) {
+							handle_operator();
+							next_char();
+						} else {
+							Token.class = ERRONEOUS;
+							next_char();
+						}
 					}
 				}
 			}

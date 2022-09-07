@@ -10,12 +10,14 @@ static int pos;
 
 #define curr()	(&Token_stream[pos])
 #define get()	(&Token_stream[pos++])
+#define next()	(pos++)
 #define unget()	(pos--)
 #define peek()	(&Token_stream[pos+1])
 #define prev()	(&Token_stream[pos-1])
 
 static int expect();
 
+static Node *read_global_expr();
 static Node *read_primary_expr();
 static Node *read_expr();
 static Node *read_assignment_expr();
@@ -24,17 +26,45 @@ static Node *read_multiplicative_expr();
 static Node *read_int();
 static Node *read_string();
 static Node *read_ident();
+static Node *read_fn_def();
+static Node **read_fn_parameters();
+static Node *read_fn_body();
+static Node *read_var_def();
 
 static void traverse();
+static char *list_params();
 
 void parser_init()
 {
 	pos = 0;
 
-	Node *root = read_primary_expr();
+	Node **node_array = (Node **) malloc(1);
+	size_t array_len = 0;
 
-	traverse(root);
-	printf("\n");
+	for (;;) {
+		Node *n = read_global_expr();
+		if (n != NULL) {
+			node_array = realloc(node_array, sizeof(Node *) * (array_len + 1));
+			node_array[array_len] = n;
+			array_len++;
+		} else {
+			break;
+		}
+	}
+
+	for (int i = 0; i < array_len; i++) {
+		traverse(node_array[i]);
+		printf("\n");
+	}
+}
+
+static int is_type_specifier(Token_type *tok)
+{
+	if (!strcmp(tok->repr, "int")) {
+		return 1;
+	} else {
+		return 0;
+	}
 }
 
 static void traverse(Node *root)
@@ -75,7 +105,27 @@ static void traverse(Node *root)
 			printf("(ASSIGN: =) ");
 			traverse(root->right);
 			break;
+		case AST_FUNCTION:
+			printf("(FUNCTION: %s | PARAMS: %s | BODY: ", root->flabel, list_params(root->n_params, root->fnparams));
+			traverse(root->fnbody);
+			printf(")");
+			break;
 	}
+}
+
+static char *list_params(size_t n, Node **params)
+{
+	char *ret = (char *) malloc(1);
+	size_t ret_size = 0;
+	for (size_t i = 0; i < n; i++) {
+		ret = realloc(ret, ret_size + strlen(params[i]->name) + 2);
+		strcpy(&ret[ret_size], params[i]->name);
+		ret_size += strlen(params[i]->name);
+		strcpy(&ret[ret_size], ", ");
+		ret_size += 2;
+	}
+
+	return ret;
 }
 
 static Node *makeNode(Node *tmp)
@@ -121,6 +171,11 @@ static Node *ast_binop(int op, Node *lhs, Node *rhs)
 	}
 }
 
+static Node *ast_fntype(char *label, size_t n, Node **params, Node *body)
+{
+	return makeNode(&(Node){AST_FUNCTION, .flabel=label, .n_params=n, .fnparams=params, .fnbody=body});
+}
+
 static int expect(int tclass)
 {
 	Token_type *t = prev();
@@ -131,14 +186,117 @@ static int expect(int tclass)
 	return 1;
 }
 
+static Node *read_global_expr()
+{
+	Token_type *tok = get();
+	if (!strcmp(tok->repr, "fn")) {
+		return read_fn_def();
+	} else if (is_type_specifier(tok)) {
+		return read_var_def();
+	} else {
+		if (tok->class != EoF) {
+			printf("Error: Unexpected global expression.\n");
+		}
+		return NULL;
+	}
+}
+
+static Node *read_fn_def()
+{
+	Token_type *tok = get();
+	if (tok->class == IDENTIFIER) {
+		char *flabel = (char *) malloc(strlen(tok->repr));
+		strcpy(flabel, tok->repr);
+		next();
+
+		if (!expect('(')) {
+			printf("Error: '(' expected.\n");
+			return NULL;
+		}
+
+		size_t n;
+		Node **params = read_fn_parameters(&n);
+
+		if (!expect('{')) {
+			printf("Error: '{' expected.\n");
+			return NULL;
+		}
+
+		Node *body = read_fn_body();
+		next();
+
+		if (!expect('}')) {
+			printf("Error: '}' expected.\n");
+			return NULL;
+		}
+
+		return ast_fntype(flabel, n, params, body);
+	}
+
+	return NULL;
+}
+
+static Node **read_fn_parameters(size_t *n)
+{
+	Node **params = (Node **) malloc(1);
+	size_t params_sz = 0;
+
+	Token_type *tok;
+	for (;;) {
+		tok = get();
+		if (is_type_specifier(tok)) {
+			tok = get();
+			if (tok->class != IDENTIFIER) {
+				printf("Error: Identifier expected after type specifier.\n");
+				break;
+			}
+			char *pname = (char *) malloc(strlen(tok->repr));
+			strcpy(pname, tok->repr);
+			Node *param = ast_identtype(pname);
+			params = realloc(params, sizeof(Node *) * (params_sz+1));
+			params[params_sz] = param;
+			params_sz++;
+		} else {
+			printf("Error: Type specifier expected.\n");
+			break;
+		}
+		tok = get();
+		if (tok->class != ',') {
+			if (tok->class == ')') {
+				break;
+			}
+			printf("Error: ',' or ')' expected.\n");
+			break;
+		}
+	}
+	*n = params_sz;
+	next();
+	return params;
+}
+
+static Node *read_fn_body()
+{
+	Node *n = read_primary_expr();
+	Token_type *tok = get();
+	if (tok->class != ';') {
+		printf("Error: Missing ';'.\n");
+		return NULL;
+	}
+	return n;
+}
+
+static Node *read_var_def()
+{
+	return read_assignment_expr();
+}
+
 static Node *read_primary_expr()
 {
 	Token_type *tok = get();
 	
 	if (expect('(')) {
 		Node *r = read_expr();
-		get();
-		if (!expect(')')) {
+		next(); if (!expect(')')) {
 			printf("Error: Unexpected token.\n");
 		}
 		return r;
