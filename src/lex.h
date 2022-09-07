@@ -6,7 +6,8 @@ enum {
 	FLOAT,
 	STRING,
 	TWO_CHAR_ASSIGNMENT,
-	TWO_CHAR_COMPARE
+	TWO_CHAR_COMPARE,
+	ARROW_OP
 };
 
 #define get_bits(ch) (charbits[(ch)&0377])

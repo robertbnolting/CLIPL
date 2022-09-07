@@ -140,6 +140,13 @@ static void handle_operator()
 			break;
 		case '+':
 		case '-':
+			next_char();
+			if (current == '>') {
+				Token.class = ARROW_OP;
+				break;
+			} else {
+				ungetch();
+			}
 		case '*':
 		case '/':
 			next_char();
