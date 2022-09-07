@@ -1,5 +1,5 @@
 enum {
-	TYPE_VOID,
+	TYPE_VOID = 1,
 	TYPE_INT,
 	TYPE_FLOAT,
 	TYPE_STRING,
@@ -36,6 +36,7 @@ typedef struct Node {
 		// function
 		struct {
 			char *flabel;
+			int return_type;
 			size_t n_params;
 			size_t n_stmts;
 			struct Node **fnparams;

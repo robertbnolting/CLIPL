@@ -61,8 +61,16 @@ void parser_init()
 
 static int is_type_specifier(Token_type *tok)
 {
-	if (!strcmp(tok->repr, "int")) {
-		return 1;
+	char *str = tok->repr;
+
+	if (!strcmp(str, "void")) {
+		return TYPE_VOID;
+	} else if (!strcmp(str, "int")) {
+		return TYPE_INT;
+	} else if (!strcmp(str, "float")) {
+		return TYPE_FLOAT;
+	} else if (!strcmp(str, "string")) {
+		return TYPE_STRING;
 	} else {
 		return 0;
 	}
@@ -107,7 +115,7 @@ static void traverse(Node *root)
 			traverse(root->right);
 			break;
 		case AST_FUNCTION:
-			printf("(FUNCTION: %s | PARAMS: %s | BODY: {\n", root->flabel, list_params(root->n_params, root->fnparams));
+			printf("(FUNCTION: %s | RETURNS: %d | PARAMS: %s | BODY: {\n", root->flabel, root->return_type, list_params(root->n_params, root->fnparams));
 			list_stmts(root->n_stmts, root->fnbody);
 			printf("}");
 			printf(")");
@@ -181,9 +189,9 @@ static Node *ast_binop(int op, Node *lhs, Node *rhs)
 	}
 }
 
-static Node *ast_fntype(char *label, size_t params_n, size_t stmts_n, Node **params, Node **body)
+static Node *ast_fntype(char *label, int ret_type, size_t params_n, size_t stmts_n, Node **params, Node **body)
 {
-	return makeNode(&(Node){AST_FUNCTION, .flabel=label, .n_params=params_n, .n_stmts=stmts_n, .fnparams=params, .fnbody=body});
+	return makeNode(&(Node){AST_FUNCTION, .flabel=label, .return_type=ret_type, .n_params=params_n, .n_stmts=stmts_n, .fnparams=params, .fnbody=body});
 }
 
 static int expect(int tclass)
@@ -227,10 +235,25 @@ static Node *read_fn_def()
 		size_t params_n;
 		Node **params = read_fn_parameters(&params_n);
 
-		if (!expect('{')) {
+		if (!expect(ARROW_OP)) {
+			printf("Error: Return type of function must be specified.\n");
+			return NULL;
+		}
+
+		int ret_type;
+		if (!(ret_type = is_type_specifier(curr()))) {
+			printf("Error: -> operator must be followed by valid type specifier.\n");
+			return NULL;
+		}
+
+		next();
+
+		if (curr()->class != '{') {
 			printf("Error: '{' expected.\n");
 			return NULL;
 		}
+
+		next();
 
 		size_t stmts_n;
 		Node **body = read_fn_body(&stmts_n);
@@ -241,7 +264,7 @@ static Node *read_fn_def()
 			return NULL;
 		}
 
-		return ast_fntype(flabel, params_n, stmts_n, params, body);
+		return ast_fntype(flabel, ret_type, params_n, stmts_n, params, body);
 	}
 
 	return NULL;
@@ -268,7 +291,9 @@ static Node **read_fn_parameters(size_t *n)
 			params[params_sz] = param;
 			params_sz++;
 		} else {
-			printf("Error: Type specifier expected.\n");
+			if (tok->class != ')') {
+				printf("Error: Type specifier expected.\n");
+			}
 			break;
 		}
 		tok = get();
