@@ -6,7 +6,6 @@ enum {
 };
 
 enum {
-	AST_VOID,
 	AST_IDENT,
 	AST_INT,
 	AST_STRING,
@@ -38,8 +37,9 @@ typedef struct Node {
 		struct {
 			char *flabel;
 			size_t n_params;
+			size_t n_stmts;
 			struct Node **fnparams;
-			struct Node *fnbody;
+			struct Node **fnbody;
 		};
 	};
 } Node;

@@ -28,11 +28,12 @@ static Node *read_string();
 static Node *read_ident();
 static Node *read_fn_def();
 static Node **read_fn_parameters();
-static Node *read_fn_body();
+static Node **read_fn_body();
 static Node *read_var_def();
 
 static void traverse();
 static char *list_params();
+static void list_stmts();
 
 void parser_init()
 {
@@ -106,10 +107,19 @@ static void traverse(Node *root)
 			traverse(root->right);
 			break;
 		case AST_FUNCTION:
-			printf("(FUNCTION: %s | PARAMS: %s | BODY: ", root->flabel, list_params(root->n_params, root->fnparams));
-			traverse(root->fnbody);
+			printf("(FUNCTION: %s | PARAMS: %s | BODY: {\n", root->flabel, list_params(root->n_params, root->fnparams));
+			list_stmts(root->n_stmts, root->fnbody);
+			printf("}");
 			printf(")");
 			break;
+	}
+}
+
+static void list_stmts(size_t n, Node **body)
+{
+	for (size_t i = 0; i < n; i++) {
+		traverse(body[i]);
+		printf("\n");
 	}
 }
 
@@ -171,9 +181,9 @@ static Node *ast_binop(int op, Node *lhs, Node *rhs)
 	}
 }
 
-static Node *ast_fntype(char *label, size_t n, Node **params, Node *body)
+static Node *ast_fntype(char *label, size_t params_n, size_t stmts_n, Node **params, Node **body)
 {
-	return makeNode(&(Node){AST_FUNCTION, .flabel=label, .n_params=n, .fnparams=params, .fnbody=body});
+	return makeNode(&(Node){AST_FUNCTION, .flabel=label, .n_params=params_n, .n_stmts=stmts_n, .fnparams=params, .fnbody=body});
 }
 
 static int expect(int tclass)
@@ -214,15 +224,16 @@ static Node *read_fn_def()
 			return NULL;
 		}
 
-		size_t n;
-		Node **params = read_fn_parameters(&n);
+		size_t params_n;
+		Node **params = read_fn_parameters(&params_n);
 
 		if (!expect('{')) {
 			printf("Error: '{' expected.\n");
 			return NULL;
 		}
 
-		Node *body = read_fn_body();
+		size_t stmts_n;
+		Node **body = read_fn_body(&stmts_n);
 		next();
 
 		if (!expect('}')) {
@@ -230,7 +241,7 @@ static Node *read_fn_def()
 			return NULL;
 		}
 
-		return ast_fntype(flabel, n, params, body);
+		return ast_fntype(flabel, params_n, stmts_n, params, body);
 	}
 
 	return NULL;
@@ -274,15 +285,29 @@ static Node **read_fn_parameters(size_t *n)
 	return params;
 }
 
-static Node *read_fn_body()
+static Node **read_fn_body(size_t *n)
 {
-	Node *n = read_primary_expr();
-	Token_type *tok = get();
-	if (tok->class != ';') {
-		printf("Error: Missing ';'.\n");
-		return NULL;
+	Node **body = (Node **) malloc(1);
+	size_t body_sz = 0;
+
+	for (;;) {
+		Node *n = read_primary_expr();
+		if (n == NULL) {
+			break;
+		}
+		Token_type *tok = get();
+		if (tok->class != ';') {
+			printf("Error: Missing ';'.\n");
+			return NULL;
+		}
+
+		body = realloc(body, sizeof(body) * (body_sz + 1));
+		body[body_sz] = n;
+		body_sz++;
 	}
-	return n;
+
+	*n = body_sz;
+	return body;
 }
 
 static Node *read_var_def()
@@ -306,7 +331,9 @@ static Node *read_primary_expr()
 		case INT: return read_int(tok);
 		case IDENTIFIER: return read_ident(tok);
 		case STRING: return read_string(tok);
-		default: return NULL;
+		default: 
+			     unget();
+			     return NULL;
 	}
 }
 
