@@ -29,7 +29,6 @@ static Node *read_ident();
 static Node *read_fn_def();
 static Node **read_fn_parameters();
 static Node **read_fn_body();
-static Node *read_var_def();
 
 static void traverse();
 static char *list_params();
@@ -209,8 +208,6 @@ static Node *read_global_expr()
 	Token_type *tok = get();
 	if (!strcmp(tok->repr, "fn")) {
 		return read_fn_def();
-	} else if (is_type_specifier(tok)) {
-		return read_var_def();
 	} else {
 		if (tok->class != EoF) {
 			printf("Error: Unexpected global expression.\n");
@@ -333,11 +330,6 @@ static Node **read_fn_body(size_t *n)
 
 	*n = body_sz;
 	return body;
-}
-
-static Node *read_var_def()
-{
-	return read_assignment_expr();
 }
 
 static Node *read_primary_expr()
