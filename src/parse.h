@@ -14,7 +14,8 @@ enum {
 	AST_MUL,
 	AST_DIV,
 	AST_ASSIGN,
-	AST_FUNCTION,
+	AST_FUNCTION_DEF,
+	AST_FUNCTION_CALL,
 };
 
 typedef struct Node {
@@ -33,7 +34,7 @@ typedef struct Node {
 			struct Node *left;
 			struct Node *right;
 		};
-		// function
+		// function definition
 		struct {
 			char *flabel;
 			int return_type;
@@ -41,6 +42,12 @@ typedef struct Node {
 			size_t n_stmts;
 			struct Node **fnparams;
 			struct Node **fnbody;
+		};
+		// function call
+		struct {
+			char *call_label;
+			size_t n_args;
+			struct Node **callargs;
 		};
 	};
 } Node;

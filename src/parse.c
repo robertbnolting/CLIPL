@@ -19,14 +19,18 @@ static int expect();
 
 static Node *read_global_expr();
 static Node *read_primary_expr();
+static Node *read_secondary_expr();
 static Node *read_expr();
+static Node *read_stmt();
 static Node *read_assignment_expr();
 static Node *read_additive_expr();
 static Node *read_multiplicative_expr();
+static Node *read_declaration_expr();
 static Node *read_int();
 static Node *read_string();
 static Node *read_ident();
 static Node *read_fn_def();
+static Node *read_fn_call();
 static Node **read_fn_parameters();
 static Node **read_fn_body();
 
@@ -113,7 +117,7 @@ static void traverse(Node *root)
 			printf("(ASSIGN: =) ");
 			traverse(root->right);
 			break;
-		case AST_FUNCTION:
+		case AST_FUNCTION_DEF:
 			printf("(FUNCTION: %s | RETURNS: %d | PARAMS: %s | BODY: {\n", root->flabel, root->return_type, list_params(root->n_params, root->fnparams));
 			list_stmts(root->n_stmts, root->fnbody);
 			printf("}");
@@ -188,9 +192,14 @@ static Node *ast_binop(int op, Node *lhs, Node *rhs)
 	}
 }
 
-static Node *ast_fntype(char *label, int ret_type, size_t params_n, size_t stmts_n, Node **params, Node **body)
+static Node *ast_funcdef(char *label, int ret_type, size_t params_n, size_t stmts_n, Node **params, Node **body)
 {
-	return makeNode(&(Node){AST_FUNCTION, .flabel=label, .return_type=ret_type, .n_params=params_n, .n_stmts=stmts_n, .fnparams=params, .fnbody=body});
+	return makeNode(&(Node){AST_FUNCTION_DEF, .flabel=label, .return_type=ret_type, .n_params=params_n, .n_stmts=stmts_n, .fnparams=params, .fnbody=body});
+}
+
+static Node *ast_funccall(char *label, size_t nargs, Node **args)
+{
+	return makeNode(&(Node){AST_FUNCTION_CALL, .call_label=label, .n_args=nargs, .callargs=args});
 }
 
 static int expect(int tclass)
@@ -261,7 +270,7 @@ static Node *read_fn_def()
 			return NULL;
 		}
 
-		return ast_fntype(flabel, ret_type, params_n, stmts_n, params, body);
+		return ast_funcdef(flabel, ret_type, params_n, stmts_n, params, body);
 	}
 
 	return NULL;
@@ -313,7 +322,7 @@ static Node **read_fn_body(size_t *n)
 	size_t body_sz = 0;
 
 	for (;;) {
-		Node *n = read_primary_expr();
+		Node *n = read_secondary_expr();
 		if (n == NULL) {
 			break;
 		}
@@ -335,12 +344,13 @@ static Node **read_fn_body(size_t *n)
 static Node *read_primary_expr()
 {
 	Token_type *tok = get();
-	
-	if (expect('(')) {
-		Node *r = read_expr();
-		next(); if (!expect(')')) {
-			printf("Error: Unexpected token.\n");
-		}
+
+	if (tok->class == EoF) {
+		return NULL;
+	}
+
+	Node *r = read_expr();	// loops when coming from multiplicative (<- additive <- assignment <- expr)
+	if (r != NULL) {
 		return r;
 	}
 
@@ -354,11 +364,75 @@ static Node *read_primary_expr()
 	}
 }
 
+static Node *read_secondary_expr()
+{
+	Node *r = read_stmt();
+	if (r == NULL) {
+		r = read_declaration_expr();
+	}
+	if (r == NULL) {
+		r = read_expr();
+	}
+
+	return r;
+}
+
 static Node *read_expr()
 {
 	Node *r = read_assignment_expr();
 
+	if (r == NULL) {
+		r = read_fn_call();
+	}
+
 	return r;
+}
+
+static Node *read_stmt()
+{
+	return NULL;
+}
+
+static Node *read_fn_call()
+{
+	Token_type *tok = prev();
+	if (tok->class == IDENTIFIER) {
+		char *label = (char *) malloc(strlen(tok->repr));
+		strcpy(label, tok->repr);
+
+		tok = get();
+		if (tok->class == '(') {
+			Node **args = (Node **) malloc(1);
+			size_t args_sz = 0;
+			for (;;) {
+				tok = get();
+				Node *arg = read_expr();
+				if (arg == NULL) {
+					break;
+				}
+
+				args = realloc(args, sizeof(Node *) * (args_sz+1));
+				args[args_sz] = arg;
+				args_sz++;
+
+				tok = get();
+				if (tok->class != ',') {
+					break;
+				}
+			}
+			if (tok->class != ')') {
+				printf("Error: Closing ')' expected.\n");
+				free(label);
+				free(args);
+				return NULL;
+			}
+
+			return ast_funccall(label, args_sz, args);
+		}
+		free(label);
+	}
+
+	return NULL;
 }
 
 static Node *read_assignment_expr()
@@ -371,6 +445,24 @@ static Node *read_assignment_expr()
 	}
 
 	return r;
+}
+
+static Node *read_declaration_expr()
+{
+	Token_type *tok = get();
+	int type;
+	if ((type = is_type_specifier(tok))) {
+		tok = get();
+		if (tok->class == IDENTIFIER) {
+			Node *lhs = ast_identtype(tok->repr);
+			tok = get();
+			if (tok->class == '=') {
+				return ast_binop('=', lhs, read_primary_expr());
+			}
+		}
+	}
+
+	return NULL;
 }
 
 static Node *read_multiplicative_expr()
