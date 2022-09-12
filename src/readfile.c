@@ -7,6 +7,11 @@ char *readFile(char *filename)
 {
 	FILE *fp = fopen(filename, "r");
 
+	if (fp == NULL) {
+		printf("Error: File not found.\n");
+		return NULL;
+	}
+
 	fseek(fp, 0, SEEK_END);
 	size_t sz = ftell(fp);
 	fseek(fp, 0, SEEK_SET);

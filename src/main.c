@@ -16,7 +16,11 @@ int main(int argc, char **argv)
 		char *filename = argv[1];
 
 		char *input = readFile(filename);
-		lexer_init(input);
+		if (input) {
+			lexer_init(input);
+		} else {
+			return 1;
+		}
 
 		do {
 			get_next_token();
