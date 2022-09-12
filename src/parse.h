@@ -14,6 +14,7 @@ enum {
 	AST_MUL,
 	AST_DIV,
 	AST_ASSIGN,
+	AST_DECLARATION,
 	AST_FUNCTION_DEF,
 	AST_FUNCTION_CALL,
 };
@@ -33,6 +34,12 @@ typedef struct Node {
 		struct {
 			struct Node *left;
 			struct Node *right;
+		};
+		// declaration
+		struct {
+			char *vlabel;
+			int vtype;
+			//struct Node *value;
 		};
 		// function definition
 		struct {

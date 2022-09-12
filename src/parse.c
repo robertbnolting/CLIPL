@@ -58,7 +58,7 @@ void parser_init()
 
 	for (int i = 0; i < array_len; i++) {
 		traverse(node_array[i]);
-		printf("\n");
+		printf("\n\n");
 	}
 }
 
@@ -117,6 +117,9 @@ static void traverse(Node *root)
 			printf("(ASSIGN: =) ");
 			traverse(root->right);
 			break;
+		case AST_DECLARATION:
+			printf("(DECLARATION: %s | TYPE: %d) ", root->vlabel, root->vtype);
+			break;
 		case AST_FUNCTION_DEF:
 			printf("(FUNCTION DEFINITION: %s | RETURNS: %d | PARAMS: %s | BODY: {\n", root->flabel, root->return_type, list_nodearray(root->n_params, root->fnparams));
 			list_stmts(root->n_stmts, root->fnbody);
@@ -139,6 +142,10 @@ static void list_stmts(size_t n, Node **body)
 
 static char *list_nodearray(size_t n, Node **buffer)
 {
+	if (n == 0) {
+		return "";
+	}
+
 	char *ret = (char *) malloc(1);
 	size_t ret_size = 0;
 
@@ -237,6 +244,11 @@ static Node *ast_binop(int op, Node *lhs, Node *rhs)
 	}
 }
 
+static Node *ast_decl(char *label, int type)
+{
+	return makeNode(&(Node){AST_DECLARATION, .vlabel=label, .vtype=type});
+}
+ 
 static Node *ast_funcdef(char *label, int ret_type, size_t params_n, size_t stmts_n, Node **params, Node **body)
 {
 	return makeNode(&(Node){AST_FUNCTION_DEF, .flabel=label, .return_type=ret_type, .n_params=params_n, .n_stmts=stmts_n, .fnparams=params, .fnbody=body});
@@ -499,10 +511,16 @@ static Node *read_declaration_expr()
 	if ((type = is_type_specifier(tok))) {
 		tok = get();
 		if (tok->class == IDENTIFIER) {
-			Node *lhs = ast_identtype(tok->repr);
+			char *label = (char *) malloc(strlen(tok->repr));
+			strcpy(label, tok->repr);
+			Node *lhs = ast_decl(label, type);
+
 			tok = get();
 			if (tok->class == '=') {
 				return ast_binop('=', lhs, read_primary_expr());
+			} else {
+				unget();
+				return lhs;
 			}
 		}
 	}
