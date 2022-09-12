@@ -85,6 +85,8 @@ typedef struct Node {
 			struct Node **if_body;
 			struct Node **else_body;
 		};
+		// return statement
+		struct Node *retval;
 	};
 } Node;
 

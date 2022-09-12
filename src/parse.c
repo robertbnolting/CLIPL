@@ -119,6 +119,10 @@ static int is_stmt_node(Node *n)
 
 static void traverse(Node *root)
 {
+	if (root == NULL) {
+		return;
+	}
+
 	switch (root->type)
 	{
 		case AST_INT:
@@ -225,6 +229,10 @@ static void traverse(Node *root)
 			printf(" ELSE: {\n");
 			list_stmts(root->n_else_stmts, root->else_body);
 			printf("})");
+		case AST_RETURN_STMT:
+			printf("(RETURN STATEMENT: ");
+			traverse(root->retval);
+			printf(") ");
 	}
 }
 
@@ -355,7 +363,6 @@ static Node *ast_binop(int op, Node *lhs, Node *rhs)
 			return makeNode(&(Node){AST_GE, .left=lhs, .right=rhs});
 		case LE:
 			return makeNode(&(Node){AST_LE, .left=lhs, .right=rhs});
-
 		default:
 			return NULL;
 	}
@@ -379,6 +386,11 @@ static Node *ast_funccall(char *label, size_t nargs, Node **args)
 static Node *ast_if_stmt(Node *cond, size_t n_if, size_t n_else, Node **ifbody, Node **elsebody)
 {
 	return makeNode(&(Node){AST_IF_STMT, .if_cond=cond, .n_if_stmts=n_if, .n_else_stmts=n_else, .if_body=ifbody, .else_body=elsebody});
+}
+
+static Node *ast_ret_stmt(Node *ret_val)
+{
+	return makeNode(&(Node){AST_RETURN_STMT, .retval=ret_val});
 }
 
 static int expect(int tclass)
@@ -699,7 +711,20 @@ static Node *read_for_stmt()
 
 static Node *read_return_stmt()
 {
-	return NULL;
+	Node *n = read_expr();
+	
+	if (n == NULL) {
+		if (prev()->class != ';') {
+			printf("Error: ';' expected.\n");
+		}
+	} else {
+		Token_type *tok = get();
+		if (tok->class != ';') {
+			printf("Error: ';' expected.\n");
+		}
+	}
+
+	return ast_ret_stmt(n);
 }
 
 static Node *read_fn_call()
