@@ -141,6 +141,9 @@ static char *list_nodearray(size_t n, Node **buffer)
 {
 	char *ret = (char *) malloc(1);
 	size_t ret_size = 0;
+
+	char *s = NULL;
+
 	for (size_t i = 0; i < n; i++) {
 		switch (buffer[i]->type)
 		{
@@ -150,7 +153,7 @@ static char *list_nodearray(size_t n, Node **buffer)
 				ret_size += strlen(buffer[i]->name);
 				break;
 			case 1:
-				char *s = (char *) malloc(11);	// INT_MAX has 10 digits
+				s = (char *) malloc(11);	// INT_MAX has 10 digits
 				sprintf(s, "%d", buffer[i]->ival);
 			        ret = realloc(ret, ret_size + strlen(s) + 2);
 				strcpy(&ret[ret_size], s);
@@ -165,7 +168,21 @@ static char *list_nodearray(size_t n, Node **buffer)
 #undef sval
 
 			case 9:
-				traverse(buffer[i]);
+				char *label = (char *) malloc(strlen(buffer[i]->call_label));
+				strcpy(label, buffer[i]->call_label);
+				char *args = list_nodearray(buffer[i]->n_args, buffer[i]->callargs);
+				s = (char *) malloc(29 + strlen(label) + strlen(args) + 1);
+
+				strcpy(s, "\n\t(FUNCTION CALL: ");
+				strcat(s+17, label);
+				strcat(s+17+(strlen(label)-1), " | ARGS: ");
+				strcat(s+28+(strlen(label)-1), args);
+				strcat(s+28+strlen(label)+strlen(args), ")");
+
+				ret = realloc(ret, ret_size + strlen(s) + 2);
+				strcpy(&ret[ret_size], s);
+				ret_size += strlen(s);
+
 				break;
 			default:
 				printf("Printing error: Could not printf Node.\n");
