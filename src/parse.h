@@ -6,6 +6,13 @@ enum {
 };
 
 enum {
+	KEYWORD_IF = 1,
+	KEYWORD_WHILE,
+	KEYWORD_FOR,
+	KEYWORD_RETURN,
+};
+
+enum {
 	AST_IDENT,
 	AST_INT,
 	AST_STRING,
@@ -17,6 +24,10 @@ enum {
 	AST_DECLARATION,
 	AST_FUNCTION_DEF,
 	AST_FUNCTION_CALL,
+	AST_IF_STMT,
+	AST_WHILE_STMT,
+	AST_FOR_STMT,
+	AST_RETURN_STMT,
 };
 
 typedef struct Node {
@@ -55,6 +66,12 @@ typedef struct Node {
 			char *call_label;
 			size_t n_args;
 			struct Node **callargs;
+		};
+		// if statement
+		struct {
+			struct Node *if_cond;
+			struct Node **if_body;
+			struct Node **else_body;
 		};
 	};
 } Node;

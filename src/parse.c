@@ -21,7 +21,20 @@ static Node *read_global_expr();
 static Node *read_primary_expr();
 static Node *read_secondary_expr();
 static Node *read_expr();
+
 static Node *read_stmt();
+static Node *read_if_stmt();
+static Node *read_while_stmt();
+static Node *read_for_stmt();
+static Node *read_return_stmt();
+
+static Node *read_conditional_expr();
+
+static Node *read_conditional_expr()
+{
+	return NULL;
+}
+
 static Node *read_assignment_expr();
 static Node *read_additive_expr();
 static Node *read_multiplicative_expr();
@@ -74,6 +87,23 @@ static int is_type_specifier(Token_type *tok)
 		return TYPE_FLOAT;
 	} else if (!strcmp(str, "string")) {
 		return TYPE_STRING;
+	} else {
+		return 0;
+	}
+}
+
+static int is_keyword(Token_type *tok)
+{
+	char *str = tok->repr;
+
+	if (!strcmp(str, "if")) {
+		return KEYWORD_IF;
+	} else if (!strcmp(str, "while")) {
+		return KEYWORD_WHILE;
+	} else if (!strcmp(str, "for")) {
+		return KEYWORD_WHILE;
+	} else if (!strcmp(str, "return")) {
+		return KEYWORD_RETURN;
 	} else {
 		return 0;
 	}
@@ -257,6 +287,11 @@ static Node *ast_funcdef(char *label, int ret_type, size_t params_n, size_t stmt
 static Node *ast_funccall(char *label, size_t nargs, Node **args)
 {
 	return makeNode(&(Node){AST_FUNCTION_CALL, .call_label=label, .n_args=nargs, .callargs=args});
+}
+
+static Node *ast_if_stmt(Node *cond, Node **ifbody, Node **elsebody)
+{
+	return makeNode(&(Node){AST_IF_STMT, .if_cond=cond, .if_body=ifbody, .else_body=elsebody});
 }
 
 static int expect(int tclass)
@@ -446,6 +481,102 @@ static Node *read_expr()
 }
 
 static Node *read_stmt()
+{
+	Token_type *tok = get();
+
+	switch (is_keyword(tok))
+	{
+		case KEYWORD_IF:
+			return read_if_stmt();
+		case KEYWORD_WHILE:
+			return read_while_stmt();
+		case KEYWORD_FOR:
+			return read_for_stmt();
+		case KEYWORD_RETURN:
+			return read_return_stmt();
+		default:
+			return NULL;
+	}
+}
+
+static Node *read_if_stmt()
+{
+	Token_type *tok = get();
+
+	if (tok->class != '(') {
+		printf("Error: '(' expected after keyword 'if'.\n");
+		return NULL;
+	}
+
+	Node *cond = read_conditional_expr();
+
+	tok  = get();
+	if (tok->class != ')') {
+		printf("Error: ')' expected after keyword 'if'.\n");
+		return NULL;
+	}
+
+	tok = get();
+	if (tok->class != '{') {
+		printf("Error: '{' expected after keyword 'if'.\n");
+		return NULL;
+	}
+
+	Node **if_body = (Node **) malloc(1);
+	size_t if_body_sz = 0;
+
+	for (;;) {
+		Node *n = read_secondary_expr();
+
+		if (n == NULL) {
+			break;
+		}
+		
+		if_body = realloc(if_body, sizeof(Node *) * (if_body_sz + 1));
+		if_body[if_body_sz] = n;
+		if_body_sz++;
+	}
+
+	tok = get();
+	if (tok->class != '}') {
+		printf("Error: '}' expected after keyword 'if'.\n");
+		return NULL;
+	}
+
+	Node **else_body = (Node **) malloc(1);
+	size_t else_body_sz = 0;
+
+	tok = get();
+	if (!strcmp("else", tok->repr)) {
+		for (;;) {
+			Node *n = read_secondary_expr();
+
+			if (n == NULL) {
+				break;
+			}
+			
+			else_body = realloc(else_body, sizeof(Node *) * (else_body_sz + 1));
+			else_body[else_body_sz] = n;
+			else_body_sz++;
+		}
+	} else {
+		else_body = NULL;
+	}
+
+	return ast_if_stmt(cond, if_body, else_body);
+}
+
+static Node *read_while_stmt()
+{
+	return NULL;
+}
+
+static Node *read_for_stmt()
+{
+	return NULL;
+}
+
+static Node *read_return_stmt()
 {
 	return NULL;
 }
