@@ -147,26 +147,37 @@ static void handle_operator()
 			}
 			break;
 		case '+':
+			next_char();
+			if (current == '=') {
+				Token.class = ADD_ASSIGN;
+			} else {
+				ungetch();
+			}
+			break;
 		case '-':
 			next_char();
 			if (current == '>') {
 				Token.class = ARROW_OP;
-				break;
+			} else if (current == '=') {
+				Token.class = SUB_ASSIGN;
 			} else {
 				ungetch();
 			}
+			break;
 		case '*':
+			next_char();
+			if (current == '=') {
+				Token.class = MUL_ASSIGN;
+			} else {
+				ungetch();
+			}
+			break;
 		case '/':
 			next_char();
-			switch (current)
-			{
-				case '=':
-					Token.class = TWO_CHAR_ASSIGNMENT;
-					break;
-				default:
-					ungetch();
-					Token.class = current;
-					break;
+			if (current == '=') {
+				Token.class = DIV_ASSIGN;
+			} else {
+				ungetch();
 			}
 			break;
 		case '>':
