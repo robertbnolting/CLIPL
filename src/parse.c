@@ -818,7 +818,7 @@ static Node *read_declaration_expr()
 
 			tok = get();
 			if (tok->class == '=') {
-				return ast_binop('=', lhs, read_secondary_expr());
+				return ast_binop('=', lhs, read_expr());
 			} else {
 				unget();
 				return lhs;

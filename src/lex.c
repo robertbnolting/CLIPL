@@ -152,6 +152,7 @@ static void handle_operator()
 				Token.class = ADD_ASSIGN;
 			} else {
 				ungetch();
+				Token.class = current;
 			}
 			break;
 		case '-':
@@ -162,6 +163,7 @@ static void handle_operator()
 				Token.class = SUB_ASSIGN;
 			} else {
 				ungetch();
+				Token.class = current;
 			}
 			break;
 		case '*':
@@ -170,6 +172,7 @@ static void handle_operator()
 				Token.class = MUL_ASSIGN;
 			} else {
 				ungetch();
+				Token.class = current;
 			}
 			break;
 		case '/':
@@ -178,6 +181,7 @@ static void handle_operator()
 				Token.class = DIV_ASSIGN;
 			} else {
 				ungetch();
+				Token.class = current;
 			}
 			break;
 		case '>':
