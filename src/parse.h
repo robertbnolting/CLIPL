@@ -85,6 +85,12 @@ typedef struct Node {
 			struct Node **if_body;
 			struct Node **else_body;
 		};
+		// while statement
+		struct {
+			struct Node *while_cond;
+			size_t n_while_stmts;
+			struct Node **while_body;
+		};
 		// return statement
 		struct Node *retval;
 	};

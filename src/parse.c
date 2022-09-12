@@ -229,10 +229,19 @@ static void traverse(Node *root)
 			printf(" ELSE: {\n");
 			list_stmts(root->n_else_stmts, root->else_body);
 			printf("})");
+			break;
+		case AST_WHILE_STMT:
+			printf("(WHILE STATEMENT | CONDITION: ");
+			traverse(root->while_cond);
+			printf("| THEN: {\n");
+			list_stmts(root->n_while_stmts, root->while_body);
+			printf("})");
+			break;
 		case AST_RETURN_STMT:
 			printf("(RETURN STATEMENT: ");
 			traverse(root->retval);
 			printf(") ");
+			break;
 	}
 }
 
@@ -386,6 +395,11 @@ static Node *ast_funccall(char *label, size_t nargs, Node **args)
 static Node *ast_if_stmt(Node *cond, size_t n_if, size_t n_else, Node **ifbody, Node **elsebody)
 {
 	return makeNode(&(Node){AST_IF_STMT, .if_cond=cond, .n_if_stmts=n_if, .n_else_stmts=n_else, .if_body=ifbody, .else_body=elsebody});
+}
+
+static Node *ast_while_stmt(Node *cond, size_t n_while, Node **whilebody)
+{
+	return makeNode(&(Node){AST_WHILE_STMT, .while_cond=cond, .n_while_stmts=n_while, .while_body=whilebody});
 }
 
 static Node *ast_ret_stmt(Node *ret_val)
@@ -701,7 +715,57 @@ static Node *read_if_stmt()
 
 static Node *read_while_stmt()
 {
-	return NULL;
+	Token_type *tok = get();
+
+	if (tok->class != '(') {
+		printf("Error: '(' expected after keyword 'if'.\n");
+		return NULL;
+	}
+
+	Node *cond = read_relational_expr();
+
+	tok  = get();
+	if (tok->class != ')') {
+		printf("Error: ')' expected after keyword 'if'.\n");
+		return NULL;
+	}
+
+	tok = get();
+	if (tok->class != '{') {
+		printf("Error: '{' expected after keyword 'if'.\n");
+		return NULL;
+	}
+
+	Node **while_body = (Node **) malloc(1);
+	size_t while_body_sz = 0;
+
+	for (;;) {
+		Node *n = read_secondary_expr();
+
+		if (n == NULL) {
+			break;
+		}
+		
+		while_body = realloc(while_body, sizeof(Node *) * (while_body_sz + 1));
+		while_body[while_body_sz] = n;
+		while_body_sz++;
+
+		if (!is_stmt_node(n)) {
+			Token_type *tok = get();
+			if (tok->class != ';') {
+				printf("Error: Missing ';'.\n");
+				return NULL;
+			}
+		}
+	}
+
+	tok = get();
+	if (tok->class != '}') {
+		printf("Error: '}' expected after keyword 'if'.\n");
+		return NULL;
+	}
+
+	return ast_while_stmt(cond, while_body_sz, while_body);
 }
 
 static Node *read_for_stmt()
