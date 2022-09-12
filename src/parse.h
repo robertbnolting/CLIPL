@@ -15,7 +15,6 @@ enum {
 enum {
 	AST_IDENT,
 	AST_INT,
-	AST_FLOAT,
 	AST_STRING,
 	AST_ADD,
 	AST_SUB,
