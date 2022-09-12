@@ -65,6 +65,7 @@ int main(int argc, char **argv)
 		/*
 		for (int i = 0; i < Token_stream_size; i++) {
 			printf("%s\n", Token_stream[i].repr);
+			printf("%d\n", Token_stream[i].class);
 		}
 		*/
 

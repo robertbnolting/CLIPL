@@ -28,7 +28,6 @@ static Node *read_while_stmt();
 static Node *read_for_stmt();
 static Node *read_return_stmt();
 
-
 static Node *read_assignment_expr();
 static Node *read_relational_expr();
 static Node *read_additive_expr();
@@ -156,9 +155,34 @@ static void traverse(Node *root)
 			printf("(ASSIGN: =) ");
 			traverse(root->right);
 			break;
+		case AST_GT:
+			traverse(root->left);
+			printf("(GREATER: >) ");
+			traverse(root->right);
+			break;
+		case AST_LT:
+			traverse(root->left);
+			printf("(LESS <) ");
+			traverse(root->right);
+			break;
 		case AST_EQ:
 			traverse(root->left);
 			printf("(EQUAL: ==) ");
+			traverse(root->right);
+			break;
+		case AST_NE:
+			traverse(root->left);
+			printf("(NOT EQUAL: !=) ");
+			traverse(root->right);
+			break;
+		case AST_GE:
+			traverse(root->left);
+			printf("(GREATER EQUAL: >=) ");
+			traverse(root->right);
+			break;
+		case AST_LE:
+			traverse(root->left);
+			printf("(LESS EQUAL: <=) ");
 			traverse(root->right);
 			break;
 		case AST_DECLARATION:
@@ -291,8 +315,19 @@ static Node *ast_binop(int op, Node *lhs, Node *rhs)
 			return makeNode(&(Node){AST_DIV, .left=lhs, .right=rhs});
 		case '=':
 			return makeNode(&(Node){AST_ASSIGN, .left=lhs, .right=rhs});
-		case TWO_CHAR_COMPARE:
+		case '>':
+			return makeNode(&(Node){AST_GT, .left=lhs, .right=rhs});
+		case '<':
+			return makeNode(&(Node){AST_LT, .left=lhs, .right=rhs});
+		case EQ:
 			return makeNode(&(Node){AST_EQ, .left=lhs, .right=rhs});
+		case NE:
+			return makeNode(&(Node){AST_NE, .left=lhs, .right=rhs});
+		case GE:
+			return makeNode(&(Node){AST_GE, .left=lhs, .right=rhs});
+		case LE:
+			return makeNode(&(Node){AST_LE, .left=lhs, .right=rhs});
+
 		default:
 			return NULL;
 	}
@@ -693,12 +728,37 @@ static Node *read_relational_expr()
 {
 	Node *r = read_additive_expr();
 
-	if (curr()->class == TWO_CHAR_COMPARE) {
-		next();
-		r = ast_binop(TWO_CHAR_COMPARE, r, read_relational_expr());
+	for (;;) {
+		switch (curr()->class)
+		{
+			case '>':
+				next();
+				r = ast_binop('>', r, read_relational_expr());
+				break;
+			case '<':
+				next();
+				r = ast_binop('<', r, read_relational_expr());
+				break;
+			case EQ:
+				next();
+				r = ast_binop(EQ, r, read_relational_expr());
+				break;
+			case NE:
+				next();
+				r = ast_binop(NE, r, read_relational_expr());
+				break;
+			case GE:
+				next();
+				r = ast_binop(GE, r, read_relational_expr());
+				break;
+			case LE:
+				next();
+				r = ast_binop(LE, r, read_relational_expr());
+				break;
+			default:
+				return r;
+		}
 	}
-
-	return r;
 }
 
 static Node *read_declaration_expr()

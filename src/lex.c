@@ -122,19 +122,27 @@ static void handle_operator()
 	switch (current)
 	{
 		case '=':
+			next_char();
+			switch (current)
+			{
+				case '=':
+					Token.class = EQ;
+					break;
+				default:
+					ungetch();
+					Token.class = current;
+			}
+			break;
 		case '!':
 			next_char();
 			switch (current)
 			{
 				case '=':
-					Token.class = TWO_CHAR_COMPARE;
+					Token.class = NE;
 					break;
 				default:
 					ungetch();
-					if (current == '=') {
-						Token.class = current;
-					}
-					// handle single '!'
+					Token.class = current;
 					break;
 			}
 			break;
@@ -154,6 +162,33 @@ static void handle_operator()
 			{
 				case '=':
 					Token.class = TWO_CHAR_ASSIGNMENT;
+					break;
+				default:
+					ungetch();
+					Token.class = current;
+					break;
+			}
+			break;
+		case '>':
+			next_char();
+			switch(current)
+			{
+				case '=':
+					Token.class = GE;
+					break;
+				default:
+					ungetch();
+					Token.class = current;
+					break;
+
+			}
+			break;
+		case '<':
+			next_char();
+			switch (current)
+			{
+				case '=':
+					Token.class = LE;
 					break;
 				default:
 					ungetch();
