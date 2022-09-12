@@ -600,10 +600,12 @@ static Node *read_if_stmt()
 		if_body[if_body_sz] = n;
 		if_body_sz++;
 
-		Token_type *tok = get();
-		if (tok->class != ';') {
-			printf("Error: Missing ';'.\n");
-			return NULL;
+		if (!is_stmt_node(n)) {
+			Token_type *tok = get();
+			if (tok->class != ';') {
+				printf("Error: Missing ';'.\n");
+				return NULL;
+			}
 		}
 	}
 
@@ -635,10 +637,12 @@ static Node *read_if_stmt()
 			else_body[else_body_sz] = n;
 			else_body_sz++;
 
-			Token_type *tok = get();
-			if (tok->class != ';') {
-				printf("Error: Missing ';'.\n");
-				return NULL;
+			if (!is_stmt_node(n)) {
+				Token_type *tok = get();
+				if (tok->class != ';') {
+					printf("Error: Missing ';'.\n");
+					return NULL;
+				}
 			}
 		}
 
