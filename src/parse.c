@@ -194,7 +194,7 @@ static void traverse(Node *root)
 			printf("})");
 			break;
 		case AST_FUNCTION_CALL:
-			printf("(FUNCTION CALL: %s | ARGS: %s)", root->call_label, list_nodearray(root->n_args, root->callargs));
+			printf("(FUNCTION CALL: %s | ARGS: %s) ", root->call_label, list_nodearray(root->n_args, root->callargs));
 			break;
 		case AST_IF_STMT:
 			printf("(IF STATEMENT | CONDITION: ");
@@ -778,7 +778,7 @@ static Node *read_declaration_expr()
 
 			tok = get();
 			if (tok->class == '=') {
-				return ast_binop('=', lhs, read_primary_expr());
+				return ast_binop('=', lhs, read_secondary_expr());
 			} else {
 				unget();
 				return lhs;
