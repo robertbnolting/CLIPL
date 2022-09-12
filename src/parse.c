@@ -35,7 +35,7 @@ static Node **read_fn_parameters();
 static Node **read_fn_body();
 
 static void traverse();
-static char *list_params();
+static char *list_nodearray();
 static void list_stmts();
 
 void parser_init()
@@ -118,10 +118,13 @@ static void traverse(Node *root)
 			traverse(root->right);
 			break;
 		case AST_FUNCTION_DEF:
-			printf("(FUNCTION: %s | RETURNS: %d | PARAMS: %s | BODY: {\n", root->flabel, root->return_type, list_params(root->n_params, root->fnparams));
+			printf("(FUNCTION DEFINITION: %s | RETURNS: %d | PARAMS: %s | BODY: {\n", root->flabel, root->return_type, list_nodearray(root->n_params, root->fnparams));
 			list_stmts(root->n_stmts, root->fnbody);
 			printf("}");
 			printf(")");
+			break;
+		case AST_FUNCTION_CALL:
+			printf("(FUNCTION CALL: %s | ARGS: %s)", root->call_label, list_nodearray(root->n_args, root->callargs));
 			break;
 	}
 }
@@ -134,14 +137,39 @@ static void list_stmts(size_t n, Node **body)
 	}
 }
 
-static char *list_params(size_t n, Node **params)
+static char *list_nodearray(size_t n, Node **buffer)
 {
 	char *ret = (char *) malloc(1);
 	size_t ret_size = 0;
 	for (size_t i = 0; i < n; i++) {
-		ret = realloc(ret, ret_size + strlen(params[i]->name) + 2);
-		strcpy(&ret[ret_size], params[i]->name);
-		ret_size += strlen(params[i]->name);
+		switch (buffer[i]->type)
+		{
+			case 0:
+				ret = realloc(ret, ret_size + strlen(buffer[i]->name) + 2);
+				strcpy(&ret[ret_size], buffer[i]->name);
+				ret_size += strlen(buffer[i]->name);
+				break;
+			case 1:
+				char *s = (char *) malloc(11);	// INT_MAX has 10 digits
+				sprintf(s, "%d", buffer[i]->ival);
+			        ret = realloc(ret, ret_size + strlen(s) + 2);
+				strcpy(&ret[ret_size], s);
+				ret_size += strlen(s);
+				break;
+			case 2:
+#define sval buffer[i]->sval
+				ret = realloc(ret, ret_size + strlen(sval) + 2);
+				strcpy(&ret[ret_size], sval);
+				ret_size += strlen(sval);
+				break;
+#undef sval
+
+			case 9:
+				traverse(buffer[i]);
+				break;
+			default:
+				printf("Printing error: Could not printf Node.\n");
+		}
 		strcpy(&ret[ret_size], ", ");
 		ret_size += 2;
 	}
@@ -345,12 +373,12 @@ static Node *read_primary_expr()
 {
 	Token_type *tok = get();
 
-	if (tok->class == EoF) {
-		return NULL;
-	}
-
-	Node *r = read_expr();	// loops when coming from multiplicative (<- additive <- assignment <- expr)
-	if (r != NULL) {
+	if (expect('(')) {
+		Node *r = read_expr();
+		next();
+		if (!expect(')')) {
+			printf("Error: Expected ')' at end of expression.\n");
+		}
 		return r;
 	}
 
@@ -405,9 +433,9 @@ static Node *read_fn_call()
 			Node **args = (Node **) malloc(1);
 			size_t args_sz = 0;
 			for (;;) {
-				tok = get();
 				Node *arg = read_expr();
 				if (arg == NULL) {
+					tok = get();
 					break;
 				}
 
@@ -462,6 +490,7 @@ static Node *read_declaration_expr()
 		}
 	}
 
+	unget();
 	return NULL;
 }
 
@@ -517,6 +546,9 @@ static Node *read_string(Token_type *tok)
 
 static Node *read_ident(Token_type *tok)
 {
+	if (curr()->class == '(') {
+		return read_fn_call();
+	}
 	char *s = (char *) malloc(strlen(tok->repr));
 	strcpy(s, tok->repr);
 
