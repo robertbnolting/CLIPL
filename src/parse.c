@@ -34,6 +34,7 @@ static Node *read_additive_expr();
 static Node *read_multiplicative_expr();
 static Node *read_declaration_expr();
 static Node *read_int();
+static Node *read_float();
 static Node *read_string();
 static Node *read_ident();
 static Node *read_fn_def();
@@ -127,6 +128,9 @@ static void traverse(Node *root)
 	{
 		case AST_INT:
 			printf("(INT: %d) ", root->ival);
+			break;
+		case AST_FLOAT:
+			printf("(FLOAT: %f) ", root->fval);
 			break;
 		case AST_STRING:
 			printf("(STRING: %s) ", root->sval);
@@ -267,27 +271,34 @@ static char *list_nodearray(size_t n, Node **buffer)
 	for (size_t i = 0; i < n; i++) {
 		switch (buffer[i]->type)
 		{
-			case 0:
+			case AST_IDENT:
 				ret = realloc(ret, ret_size + strlen(buffer[i]->name) + 2);
 				strcpy(&ret[ret_size], buffer[i]->name);
 				ret_size += strlen(buffer[i]->name);
 				break;
-			case 1:
+			case AST_INT:
 				s = (char *) malloc(11);	// INT_MAX has 10 digits
 				sprintf(s, "%d", buffer[i]->ival);
 			        ret = realloc(ret, ret_size + strlen(s) + 2);
 				strcpy(&ret[ret_size], s);
 				ret_size += strlen(s);
 				break;
-			case 2:
+			case AST_FLOAT:
+				s = (char *) malloc(20);
+				sprintf(s, "%d", buffer[i]->ival);
+			        ret = realloc(ret, ret_size + strlen(s) + 2);
+				strcpy(&ret[ret_size], s);
+				ret_size += strlen(s);
+				break;
+
+			case AST_STRING:
 #define sval buffer[i]->sval
 				ret = realloc(ret, ret_size + strlen(sval) + 2);
 				strcpy(&ret[ret_size], sval);
 				ret_size += strlen(sval);
 				break;
 #undef sval
-
-			case 9:
+			case AST_FUNCTION_CALL:
 				char *label = (char *) malloc(strlen(buffer[i]->call_label));
 				strcpy(label, buffer[i]->call_label);
 				char *args = list_nodearray(buffer[i]->n_args, buffer[i]->callargs);
@@ -326,6 +337,11 @@ static Node *makeNode(Node *tmp)
 static Node *ast_inttype(int val)
 {
 	return makeNode(&(Node){AST_INT, .ival = val});
+}
+
+static Node *ast_floattype(float val)
+{
+	return makeNode(&(Node){AST_FLOAT, .fval = val});
 }
 
 static Node *ast_identtype(char *n)
@@ -565,6 +581,7 @@ static Node *read_primary_expr()
 
 	switch (tok->class) {
 		case INT: return read_int(tok);
+		case FLOAT: return read_float(tok);
 		case IDENTIFIER: return read_ident(tok);
 		case STRING: return read_string(tok);
 		default: 
@@ -959,6 +976,15 @@ static Node *read_int(Token_type *tok)
 	long v = strncasecmp(s, "0b", 2) ? strtol(s, &end, 0) : strtol(s, &end, 2);
 
 	return ast_inttype(v);
+}
+
+static Node *read_float(Token_type *tok)
+{
+	char *s = tok->repr;
+	char *end;
+	float v = strtof(s, &end);
+
+	return ast_floattype(v);
 }
 
 static Node *read_string(Token_type *tok)
