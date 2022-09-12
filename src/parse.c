@@ -155,6 +155,26 @@ static void traverse(Node *root)
 			printf("(ASSIGN: =) ");
 			traverse(root->right);
 			break;
+		case AST_ADD_ASSIGN:
+			traverse(root->left);
+			printf("(ADD ASSIGN: +=) ");
+			traverse(root->right);
+			break;
+		case AST_SUB_ASSIGN:
+			traverse(root->left);
+			printf("(SUB ASSIGN: -=) ");
+			traverse(root->right);
+			break;
+		case AST_MUL_ASSIGN:
+			traverse(root->left);
+			printf("(MUL ASSIGN: *=) ");
+			traverse(root->right);
+			break;
+		case AST_DIV_ASSIGN:
+			traverse(root->left);
+			printf("(DIV ASSIGN: /=) ");
+			traverse(root->right);
+			break;
 		case AST_GT:
 			traverse(root->left);
 			printf("(GREATER: >) ");
@@ -319,6 +339,14 @@ static Node *ast_binop(int op, Node *lhs, Node *rhs)
 			return makeNode(&(Node){AST_GT, .left=lhs, .right=rhs});
 		case '<':
 			return makeNode(&(Node){AST_LT, .left=lhs, .right=rhs});
+		case ADD_ASSIGN:
+			return makeNode(&(Node){AST_ADD_ASSIGN, .left=lhs, .right=rhs});
+		case SUB_ASSIGN:
+			return makeNode(&(Node){AST_SUB_ASSIGN, .left=lhs, .right=rhs});
+		case MUL_ASSIGN:
+			return makeNode(&(Node){AST_MUL_ASSIGN, .left=lhs, .right=rhs});
+		case DIV_ASSIGN:
+			return makeNode(&(Node){AST_DIV_ASSIGN, .left=lhs, .right=rhs});
 		case EQ:
 			return makeNode(&(Node){AST_EQ, .left=lhs, .right=rhs});
 		case NE:
@@ -723,6 +751,18 @@ static Node *read_assignment_expr()
 	if (curr()->class == '=') {
 		next();
 		r = ast_binop('=', r, read_assignment_expr());
+	} else if (curr()->class == ADD_ASSIGN) {
+		next();
+		r = ast_binop(ADD_ASSIGN, r, read_assignment_expr());
+	} else if (curr()->class == SUB_ASSIGN) {
+		next();
+		r = ast_binop(SUB_ASSIGN, r, read_assignment_expr());
+	} else if (curr()->class == MUL_ASSIGN) {
+		next();
+		r = ast_binop(MUL_ASSIGN, r, read_assignment_expr());
+	} else if (curr()->class == DIV_ASSIGN) {
+		next();
+		r = ast_binop(DIV_ASSIGN, r, read_assignment_expr());
 	}
 
 	return r;
