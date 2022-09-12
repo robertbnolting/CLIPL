@@ -28,14 +28,9 @@ static Node *read_while_stmt();
 static Node *read_for_stmt();
 static Node *read_return_stmt();
 
-static Node *read_conditional_expr();
-
-static Node *read_conditional_expr()
-{
-	return NULL;
-}
 
 static Node *read_assignment_expr();
+static Node *read_relational_expr();
 static Node *read_additive_expr();
 static Node *read_multiplicative_expr();
 static Node *read_declaration_expr();
@@ -109,6 +104,20 @@ static int is_keyword(Token_type *tok)
 	}
 }
 
+static int is_stmt_node(Node *n)
+{
+	switch (n->type)
+	{
+		case AST_IF_STMT:
+		case AST_WHILE_STMT:
+		case AST_FOR_STMT:
+		case AST_RETURN_STMT:
+			return 1;
+		default:
+			return 0;
+	}
+}
+
 static void traverse(Node *root)
 {
 	switch (root->type)
@@ -147,18 +156,31 @@ static void traverse(Node *root)
 			printf("(ASSIGN: =) ");
 			traverse(root->right);
 			break;
+		case AST_EQ:
+			traverse(root->left);
+			printf("(EQUAL: ==) ");
+			traverse(root->right);
+			break;
 		case AST_DECLARATION:
 			printf("(DECLARATION: %s | TYPE: %d) ", root->vlabel, root->vtype);
 			break;
 		case AST_FUNCTION_DEF:
 			printf("(FUNCTION DEFINITION: %s | RETURNS: %d | PARAMS: %s | BODY: {\n", root->flabel, root->return_type, list_nodearray(root->n_params, root->fnparams));
 			list_stmts(root->n_stmts, root->fnbody);
-			printf("}");
-			printf(")");
+			printf("})");
 			break;
 		case AST_FUNCTION_CALL:
 			printf("(FUNCTION CALL: %s | ARGS: %s)", root->call_label, list_nodearray(root->n_args, root->callargs));
 			break;
+		case AST_IF_STMT:
+			printf("(IF STATEMENT | CONDITION: ");
+			traverse(root->if_cond);
+			printf("| THEN: {\n");
+			list_stmts(root->n_if_stmts, root->if_body);
+			printf("}");
+			printf(" ELSE: {\n");
+			list_stmts(root->n_else_stmts, root->else_body);
+			printf("})");
 	}
 }
 
@@ -269,6 +291,8 @@ static Node *ast_binop(int op, Node *lhs, Node *rhs)
 			return makeNode(&(Node){AST_DIV, .left=lhs, .right=rhs});
 		case '=':
 			return makeNode(&(Node){AST_ASSIGN, .left=lhs, .right=rhs});
+		case TWO_CHAR_COMPARE:
+			return makeNode(&(Node){AST_EQ, .left=lhs, .right=rhs});
 		default:
 			return NULL;
 	}
@@ -289,9 +313,9 @@ static Node *ast_funccall(char *label, size_t nargs, Node **args)
 	return makeNode(&(Node){AST_FUNCTION_CALL, .call_label=label, .n_args=nargs, .callargs=args});
 }
 
-static Node *ast_if_stmt(Node *cond, Node **ifbody, Node **elsebody)
+static Node *ast_if_stmt(Node *cond, size_t n_if, size_t n_else, Node **ifbody, Node **elsebody)
 {
-	return makeNode(&(Node){AST_IF_STMT, .if_cond=cond, .if_body=ifbody, .else_body=elsebody});
+	return makeNode(&(Node){AST_IF_STMT, .if_cond=cond, .n_if_stmts=n_if, .n_else_stmts=n_else, .if_body=ifbody, .else_body=elsebody});
 }
 
 static int expect(int tclass)
@@ -355,8 +379,8 @@ static Node *read_fn_def()
 
 		size_t stmts_n;
 		Node **body = read_fn_body(&stmts_n);
-		next();
 
+		next();
 		if (!expect('}')) {
 			printf("Error: '}' expected.\n");
 			return NULL;
@@ -418,10 +442,14 @@ static Node **read_fn_body(size_t *n)
 		if (n == NULL) {
 			break;
 		}
-		Token_type *tok = get();
-		if (tok->class != ';') {
-			printf("Error: Missing ';'.\n");
-			return NULL;
+		
+		if (!is_stmt_node(n))
+		{
+			Token_type *tok = get();
+			if (tok->class != ';') {
+				printf("Error: Missing ';'.\n");
+				return NULL;
+			}
 		}
 
 		body = realloc(body, sizeof(body) * (body_sz + 1));
@@ -495,6 +523,7 @@ static Node *read_stmt()
 		case KEYWORD_RETURN:
 			return read_return_stmt();
 		default:
+			unget();
 			return NULL;
 	}
 }
@@ -508,7 +537,7 @@ static Node *read_if_stmt()
 		return NULL;
 	}
 
-	Node *cond = read_conditional_expr();
+	Node *cond = read_relational_expr();
 
 	tok  = get();
 	if (tok->class != ')') {
@@ -535,6 +564,12 @@ static Node *read_if_stmt()
 		if_body = realloc(if_body, sizeof(Node *) * (if_body_sz + 1));
 		if_body[if_body_sz] = n;
 		if_body_sz++;
+
+		Token_type *tok = get();
+		if (tok->class != ';') {
+			printf("Error: Missing ';'.\n");
+			return NULL;
+		}
 	}
 
 	tok = get();
@@ -548,6 +583,12 @@ static Node *read_if_stmt()
 
 	tok = get();
 	if (!strcmp("else", tok->repr)) {
+		tok = get();
+		if (tok->class != '{') {
+			printf("Error: '{' expected after keyword 'else'.\n");
+			return NULL;
+		}
+
 		for (;;) {
 			Node *n = read_secondary_expr();
 
@@ -558,12 +599,25 @@ static Node *read_if_stmt()
 			else_body = realloc(else_body, sizeof(Node *) * (else_body_sz + 1));
 			else_body[else_body_sz] = n;
 			else_body_sz++;
+
+			Token_type *tok = get();
+			if (tok->class != ';') {
+				printf("Error: Missing ';'.\n");
+				return NULL;
+			}
+		}
+
+		tok = get();
+		if (tok->class != '}') {
+			printf("Error: '}' expected after keyword 'else'.\n");
+			return NULL;
 		}
 	} else {
+		unget();
 		else_body = NULL;
 	}
 
-	return ast_if_stmt(cond, if_body, else_body);
+	return ast_if_stmt(cond, if_body_sz, else_body_sz, if_body, else_body);
 }
 
 static Node *read_while_stmt()
@@ -625,11 +679,23 @@ static Node *read_fn_call()
 
 static Node *read_assignment_expr()
 {
-	Node *r = read_additive_expr();
+	Node *r = read_relational_expr();
 
 	if (curr()->class == '=') {
-		pos++;
+		next();
 		r = ast_binop('=', r, read_assignment_expr());
+	}
+
+	return r;
+}
+
+static Node *read_relational_expr()
+{
+	Node *r = read_additive_expr();
+
+	if (curr()->class == TWO_CHAR_COMPARE) {
+		next();
+		r = ast_binop(TWO_CHAR_COMPARE, r, read_relational_expr());
 	}
 
 	return r;

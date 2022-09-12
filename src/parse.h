@@ -21,6 +21,7 @@ enum {
 	AST_MUL,
 	AST_DIV,
 	AST_ASSIGN,
+	AST_EQ,
 	AST_DECLARATION,
 	AST_FUNCTION_DEF,
 	AST_FUNCTION_CALL,
@@ -70,6 +71,8 @@ typedef struct Node {
 		// if statement
 		struct {
 			struct Node *if_cond;
+			size_t n_if_stmts;
+			size_t n_else_stmts;
 			struct Node **if_body;
 			struct Node **else_body;
 		};
