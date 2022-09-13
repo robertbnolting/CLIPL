@@ -33,10 +33,11 @@ static Node *read_relational_expr();
 static Node *read_additive_expr();
 static Node *read_multiplicative_expr();
 static Node *read_declaration_expr();
+static Node *read_ident();
 static Node *read_int();
 static Node *read_float();
 static Node *read_string();
-static Node *read_ident();
+static Node *read_array_expr();
 static Node *read_fn_def();
 static Node *read_fn_call();
 static Node **read_fn_parameters();
@@ -96,7 +97,7 @@ static int is_keyword(Token_type *tok)
 	} else if (!strcmp(str, "while")) {
 		return KEYWORD_WHILE;
 	} else if (!strcmp(str, "for")) {
-		return KEYWORD_WHILE;
+		return KEYWORD_FOR;
 	} else if (!strcmp(str, "return")) {
 		return KEYWORD_RETURN;
 	} else {
@@ -125,7 +126,10 @@ static void traverse(Node *root)
 	}
 
 	switch (root->type)
-	{
+	{	
+		case AST_IDENT:
+			printf("(IDENT: %s) ", root->name);
+			break;
 		case AST_INT:
 			printf("(INT: %d) ", root->ival);
 			break;
@@ -135,8 +139,8 @@ static void traverse(Node *root)
 		case AST_STRING:
 			printf("(STRING: %s) ", root->sval);
 			break;
-		case AST_IDENT:
-			printf("(IDENT: %s) ", root->name);
+		case AST_ARRAY:
+			printf("(ARRAY: [%s]) ", list_nodearray(root->array_size, root->array_elems));
 			break;
 		case AST_ADD:
 			traverse(root->left);
@@ -285,7 +289,7 @@ static char *list_nodearray(size_t n, Node **buffer)
 				break;
 			case AST_FLOAT:
 				s = (char *) malloc(20);
-				sprintf(s, "%d", buffer[i]->ival);
+				sprintf(s, "%f", buffer[i]->fval);
 			        ret = realloc(ret, ret_size + strlen(s) + 2);
 				strcpy(&ret[ret_size], s);
 				ret_size += strlen(s);
@@ -298,6 +302,20 @@ static char *list_nodearray(size_t n, Node **buffer)
 				ret_size += strlen(sval);
 				break;
 #undef sval
+			case AST_ARRAY:
+				s = (char *) calloc(3, 1);	// "[]"
+				s[0] = '[';
+				char *elems = list_nodearray(buffer[i]->array_size, buffer[i]->array_elems);
+				s = realloc(s, strlen(elems) + 3);
+				strcat(s+1, elems);
+				s[strlen(s)] = ']';
+				s[strlen(s)] = '\0';
+
+				ret = realloc(ret, ret_size + strlen(s) + 2);
+				strcpy(&ret[ret_size], s);
+				ret_size += strlen(s);
+
+				break;
 			case AST_FUNCTION_CALL:
 				char *label = (char *) malloc(strlen(buffer[i]->call_label));
 				strcpy(label, buffer[i]->call_label);
@@ -352,6 +370,11 @@ static Node *ast_identtype(char *n)
 static Node *ast_stringtype(char *val)
 {
 	return makeNode(&(Node){AST_STRING, .sval = val});
+}
+
+static Node *ast_arraytype(size_t sz, Node **arr)
+{
+	return makeNode(&(Node){AST_ARRAY, .array_size=sz, .array_elems=arr});
 }
 
 static Node *ast_binop(int op, Node *lhs, Node *rhs)
@@ -576,6 +599,11 @@ static Node *read_primary_expr()
 		if (!expect(')')) {
 			printf("Error: Expected ')' at end of expression.\n");
 		}
+		return r;
+	}
+
+	if (expect('[')) {
+		Node *r = read_array_expr();
 		return r;
 	}
 
@@ -967,6 +995,35 @@ static Node *read_additive_expr()
 			return r;
 		}
 	}
+}
+
+static Node *read_array_expr()
+{
+	Node **array = (Node **) malloc(1);
+	size_t array_sz = 0;
+	Token_type *tok;
+	for (;;) {
+		Node *e = read_primary_expr();
+		if (e == NULL) {
+			printf("Error: Unexpected token in array expression.\n");
+			return NULL;
+		}
+
+		array = realloc(array, sizeof(Node *) * (array_sz + 1));
+		array[array_sz] = e;
+		array_sz++;
+
+		tok = get();
+		if (tok->class != ',') {
+			if (tok->class != ']') {
+				printf("Error: Unexpected token in array expression.\n");
+				return NULL;
+			}
+			break;
+		}
+	}
+
+	return ast_arraytype(array_sz, array);
 }
 
 static Node *read_int(Token_type *tok)

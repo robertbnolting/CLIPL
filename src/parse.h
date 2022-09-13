@@ -17,6 +17,7 @@ enum {
 	AST_INT,
 	AST_FLOAT,
 	AST_STRING,
+	AST_ARRAY,
 	AST_ADD,
 	AST_SUB,
 	AST_MUL,
@@ -44,14 +45,19 @@ enum {
 typedef struct Node {
 	int type;
 	union {
+		// identifier
+		char *name;
 		// int
 		int ival;
 		// float
 		float fval;
 		// string
 		char *sval;
-		// identifier
-		char *name;
+		// array
+		struct {
+			size_t array_size;
+			struct Node **array_elems;
+		};
 		// binary operator
 		struct {
 			struct Node *left;
