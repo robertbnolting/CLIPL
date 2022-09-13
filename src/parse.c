@@ -1005,8 +1005,7 @@ static Node *read_array_expr()
 	for (;;) {
 		Node *e = read_primary_expr();
 		if (e == NULL) {
-			printf("Error: Unexpected token in array expression.\n");
-			return NULL;
+			break;
 		}
 
 		array = realloc(array, sizeof(Node *) * (array_sz + 1));
@@ -1015,12 +1014,15 @@ static Node *read_array_expr()
 
 		tok = get();
 		if (tok->class != ',') {
-			if (tok->class != ']') {
-				printf("Error: Unexpected token in array expression.\n");
-				return NULL;
-			}
+			unget();
 			break;
 		}
+	}
+
+	tok = get();
+	if (tok->class != ']') {
+		printf("Error: Unexpected token in array expression.\n");
+		return NULL;
 	}
 
 	return ast_arraytype(array_sz, array);
