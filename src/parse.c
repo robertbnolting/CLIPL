@@ -30,6 +30,7 @@ static Node *read_return_stmt();
 
 static Node *read_assignment_expr();
 static Node *read_relational_expr();
+static Node *read_enumerable_expr();
 static Node *read_additive_expr();
 static Node *read_multiplicative_expr();
 static Node *read_declaration_expr();
@@ -241,8 +242,15 @@ static void traverse(Node *root)
 		case AST_WHILE_STMT:
 			printf("(WHILE STATEMENT | CONDITION: ");
 			traverse(root->while_cond);
-			printf("| THEN: {\n");
+			printf("| BODY: {\n");
 			list_stmts(root->n_while_stmts, root->while_body);
+			printf("})");
+			break;
+		case AST_FOR_STMT:
+			printf("(FOR STATEMENT | ITERATOR OF TYPE %d: %s | ENUMERABLE: ", root->for_iterator->vtype, root->for_iterator->vlabel);
+			traverse(root->for_enum);
+			printf("| BODY: {\n");
+			list_stmts(root->n_for_stmts, root->for_body);
 			printf("})");
 			break;
 		case AST_RETURN_STMT:
@@ -439,6 +447,11 @@ static Node *ast_if_stmt(Node *cond, size_t n_if, size_t n_else, Node **ifbody, 
 static Node *ast_while_stmt(Node *cond, size_t n_while, Node **whilebody)
 {
 	return makeNode(&(Node){AST_WHILE_STMT, .while_cond=cond, .n_while_stmts=n_while, .while_body=whilebody});
+}
+
+static Node *ast_for_stmt(Node *it, Node *enumerable, size_t n_for, Node **forbody)
+{
+	return makeNode(&(Node){AST_FOR_STMT, .for_iterator=it, .for_enum=enumerable, .n_for_stmts=n_for, .for_body=forbody});
 }
 
 static Node *ast_ret_stmt(Node *ret_val)
@@ -815,7 +828,79 @@ static Node *read_while_stmt()
 
 static Node *read_for_stmt()
 {
-	return NULL;
+	Token_type *tok = get();
+	if (tok->class != '(') {
+		printf("Error: '(' expected after keyword 'for'.\n");
+		return NULL;
+	}
+
+	Node *iterator = read_declaration_expr();
+
+	/*
+	tok = get();
+	if (!is_type_specifier(tok)) {
+		printf("Error: Type specifier expected in for expression.\n");
+		return NULL;
+	}
+
+	tok = get();
+	if (tok->class != IDENTIFIER) {
+		printf("Error: Identifier expected after type specifier.\n");
+		return NULL;
+	}
+
+	Node *iterator = read_ident(tok);
+	*/
+
+	tok = get();
+	if (tok->class != ':') {
+		printf("Error: ':' operator expected in iterator definition.\n");
+		return NULL;
+	}
+
+	Node *enumerable = read_enumerable_expr();
+
+	tok = get();
+	if (tok->class != ')') {
+		printf("Error: '(' expected after keyword 'for'.\n");
+		return NULL;
+	}
+
+	tok = get();
+	if (tok->class != '{') {
+		printf("Error: '{' expected after keyword 'for'.\n");
+		return NULL;
+	}
+
+	Node **for_body = (Node **) malloc(1);
+	size_t for_body_sz = 0;
+	for (;;) {
+		Node *n = read_secondary_expr();
+
+		if (n == NULL) {
+			break;
+		}
+		
+		for_body = realloc(for_body, sizeof(Node *) * (for_body_sz + 1));
+		for_body[for_body_sz] = n;
+		for_body_sz++;
+
+		if (!is_stmt_node(n)) {
+			Token_type *tok = get();
+			if (tok->class != ';') {
+				printf("Error: Missing ';'.\n");
+				return NULL;
+			}
+		}
+	}
+
+	tok = get();
+	if (tok->class != '}') {
+		printf("Error: '}' expected after keyword 'for'.\n");
+		return NULL;
+	}
+
+	return ast_for_stmt(iterator, enumerable, for_body_sz, for_body);
 }
 
 static Node *read_return_stmt()
@@ -995,6 +1080,20 @@ static Node *read_additive_expr()
 			return r;
 		}
 	}
+}
+
+static Node *read_enumerable_expr()
+{
+	Node *r;
+	Token_type *tok = get();
+	if (tok->class == '[') {
+		r = read_array_expr();
+	} else {
+		unget();
+		r = read_fn_call();
+	}
+	
+	return r;
 }
 
 static Node *read_array_expr()

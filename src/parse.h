@@ -98,6 +98,13 @@ typedef struct Node {
 			size_t n_while_stmts;
 			struct Node **while_body;
 		};
+		// for statement
+		struct {
+			struct Node *for_iterator;
+			struct Node *for_enum;
+			size_t n_for_stmts;
+			struct Node **for_body;
+		};
 		// return statement
 		struct Node *retval;
 	};
