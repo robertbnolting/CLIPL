@@ -15,7 +15,8 @@ static int pos;
 #define peek()	(&Token_stream[pos+1])
 #define prev()	(&Token_stream[pos-1])
 
-static int expect();
+static int next_token();
+static void expect();
 
 static Node *read_global_expr();
 static Node *read_primary_expr();
@@ -459,14 +460,28 @@ static Node *ast_ret_stmt(Node *ret_val)
 	return makeNode(&(Node){AST_RETURN_STMT, .retval=ret_val});
 }
 
-static int expect(int tclass)
+static int next_token(int tclass)
 {
-	Token_type *t = prev();
-	if (t->class != tclass) {
+	Token_type *tok = get();
+	if (tok->class != tclass) {
+		unget();
 		return 0;
 	}
-	
 	return 1;
+}
+
+static void expect(int tclass, const char *msg)
+{
+	Token_type *tok = get();
+	if (tok->class != tclass) {
+		if (msg[0] == 0) {
+			printf("Error: Unexpected token.\n");
+		} else {
+			printf("Error: %s\n", msg);
+		}
+
+		exit(1);
+	}
 }
 
 static Node *read_global_expr()
@@ -488,44 +503,27 @@ static Node *read_fn_def()
 	if (tok->class == IDENTIFIER) {
 		char *flabel = (char *) malloc(strlen(tok->repr));
 		strcpy(flabel, tok->repr);
-		next();
 
-		if (!expect('(')) {
-			printf("Error: '(' expected.\n");
-			return NULL;
-		}
+		expect('(', "");
 
 		size_t params_n;
 		Node **params = read_fn_parameters(&params_n);
 
-		if (!expect(ARROW_OP)) {
-			printf("Error: Return type of function must be specified.\n");
-			return NULL;
-		}
+		expect(ARROW_OP, "");
 
+		tok = get();
 		int ret_type;
-		if (!(ret_type = is_type_specifier(curr()))) {
+		if (!(ret_type = is_type_specifier(tok))) {
 			printf("Error: -> operator must be followed by valid type specifier.\n");
 			return NULL;
 		}
 
-		next();
-
-		if (curr()->class != '{') {
-			printf("Error: '{' expected.\n");
-			return NULL;
-		}
-
-		next();
+		expect('{', "");
 
 		size_t stmts_n;
 		Node **body = read_fn_body(&stmts_n);
 
-		next();
-		if (!expect('}')) {
-			printf("Error: '}' expected.\n");
-			return NULL;
-		}
+		expect('}', "");
 
 		return ast_funcdef(flabel, ret_type, params_n, stmts_n, params, body);
 	}
@@ -542,11 +540,8 @@ static Node **read_fn_parameters(size_t *n)
 	for (;;) {
 		tok = get();
 		if (is_type_specifier(tok)) {
-			tok = get();
-			if (tok->class != IDENTIFIER) {
-				printf("Error: Identifier expected after type specifier.\n");
-				break;
-			}
+			expect(IDENTIFIER, "Identifier expected after type specifier.");
+
 			char *pname = (char *) malloc(strlen(tok->repr));
 			strcpy(pname, tok->repr);
 			Node *param = ast_identtype(pname);
@@ -554,9 +549,8 @@ static Node **read_fn_parameters(size_t *n)
 			params[params_sz] = param;
 			params_sz++;
 		} else {
-			if (tok->class != ')') {
-				printf("Error: Type specifier expected.\n");
-			}
+			unget();
+			expect(')', "Type specifier expected.");
 			break;
 		}
 		tok = get();
@@ -569,7 +563,6 @@ static Node **read_fn_parameters(size_t *n)
 		}
 	}
 	*n = params_sz;
-	next();
 	return params;
 }
 
@@ -586,11 +579,7 @@ static Node **read_fn_body(size_t *n)
 		
 		if (!is_stmt_node(n))
 		{
-			Token_type *tok = get();
-			if (tok->class != ';') {
-				printf("Error: Missing ';'.\n");
-				return NULL;
-			}
+			expect(';', "Missing ';'.");
 		}
 
 		body = realloc(body, sizeof(body) * (body_sz + 1));
@@ -606,16 +595,15 @@ static Node *read_primary_expr()
 {
 	Token_type *tok = get();
 
-	if (expect('(')) {
+	if (tok->class == '(') {
 		Node *r = read_expr();
 		next();
-		if (!expect(')')) {
-			printf("Error: Expected ')' at end of expression.\n");
-		}
+		expect(')', "");
+		expect(')', "Expected ')' at end of expression.");
 		return r;
 	}
 
-	if (expect('[')) {
+	if (tok->class == '[') {
 		Node *r = read_array_expr();
 		return r;
 	}
@@ -677,26 +665,13 @@ static Node *read_stmt()
 
 static Node *read_if_stmt()
 {
-	Token_type *tok = get();
-
-	if (tok->class != '(') {
-		printf("Error: '(' expected after keyword 'if'.\n");
-		return NULL;
-	}
+	expect('(', "'(' expected after keyword 'if'.");
 
 	Node *cond = read_relational_expr();
 
-	tok  = get();
-	if (tok->class != ')') {
-		printf("Error: ')' expected after keyword 'if'.\n");
-		return NULL;
-	}
+	expect(')', "')' expected after keyword 'if'.");
 
-	tok = get();
-	if (tok->class != '{') {
-		printf("Error: '{' expected after keyword 'if'.\n");
-		return NULL;
-	}
+	expect('{', "'{' expected after keyword 'if'."); 
 
 	Node **if_body = (Node **) malloc(1);
 	size_t if_body_sz = 0;
@@ -713,30 +688,18 @@ static Node *read_if_stmt()
 		if_body_sz++;
 
 		if (!is_stmt_node(n)) {
-			Token_type *tok = get();
-			if (tok->class != ';') {
-				printf("Error: Missing ';'.\n");
-				return NULL;
-			}
+			expect(';', "Missing ';'.");
 		}
 	}
 
-	tok = get();
-	if (tok->class != '}') {
-		printf("Error: '}' expected after keyword 'if'.\n");
-		return NULL;
-	}
+	expect('}', "'}' expected after keyword 'if'.");
 
 	Node **else_body = (Node **) malloc(1);
 	size_t else_body_sz = 0;
 
-	tok = get();
+	Token_type *tok = get();
 	if (!strcmp("else", tok->repr)) {
-		tok = get();
-		if (tok->class != '{') {
-			printf("Error: '{' expected after keyword 'else'.\n");
-			return NULL;
-		}
+		expect('{', "'{' expected after keyword 'else'.");
 
 		for (;;) {
 			Node *n = read_secondary_expr();
@@ -750,19 +713,11 @@ static Node *read_if_stmt()
 			else_body_sz++;
 
 			if (!is_stmt_node(n)) {
-				Token_type *tok = get();
-				if (tok->class != ';') {
-					printf("Error: Missing ';'.\n");
-					return NULL;
-				}
+				expect(';', "Missing ';'.");
 			}
 		}
 
-		tok = get();
-		if (tok->class != '}') {
-			printf("Error: '}' expected after keyword 'else'.\n");
-			return NULL;
-		}
+		expect('}', "'}' expected after keyword 'else'.");
 	} else {
 		unget();
 		else_body = NULL;
@@ -773,26 +728,13 @@ static Node *read_if_stmt()
 
 static Node *read_while_stmt()
 {
-	Token_type *tok = get();
-
-	if (tok->class != '(') {
-		printf("Error: '(' expected after keyword 'if'.\n");
-		return NULL;
-	}
+	expect('(', "'(' expected after keyword 'while'.");
 
 	Node *cond = read_relational_expr();
 
-	tok  = get();
-	if (tok->class != ')') {
-		printf("Error: ')' expected after keyword 'if'.\n");
-		return NULL;
-	}
+	expect(')', "')' expected after keyword 'while'.");
 
-	tok = get();
-	if (tok->class != '{') {
-		printf("Error: '{' expected after keyword 'if'.\n");
-		return NULL;
-	}
+	expect('{', "'{' expected after keyword 'while'.");
 
 	Node **while_body = (Node **) malloc(1);
 	size_t while_body_sz = 0;
@@ -809,68 +751,28 @@ static Node *read_while_stmt()
 		while_body_sz++;
 
 		if (!is_stmt_node(n)) {
-			Token_type *tok = get();
-			if (tok->class != ';') {
-				printf("Error: Missing ';'.\n");
-				return NULL;
-			}
+			expect(';', "Missing ';'.");
 		}
 	}
 
-	tok = get();
-	if (tok->class != '}') {
-		printf("Error: '}' expected after keyword 'if'.\n");
-		return NULL;
-	}
+	expect('}', "'}' expected after keyword 'while'.");
 
 	return ast_while_stmt(cond, while_body_sz, while_body);
 }
 
 static Node *read_for_stmt()
 {
-	Token_type *tok = get();
-	if (tok->class != '(') {
-		printf("Error: '(' expected after keyword 'for'.\n");
-		return NULL;
-	}
+	expect('(', "'(' expected after keyword 'for'.");
 
 	Node *iterator = read_declaration_expr();
 
-	/*
-	tok = get();
-	if (!is_type_specifier(tok)) {
-		printf("Error: Type specifier expected in for expression.\n");
-		return NULL;
-	}
-
-	tok = get();
-	if (tok->class != IDENTIFIER) {
-		printf("Error: Identifier expected after type specifier.\n");
-		return NULL;
-	}
-
-	Node *iterator = read_ident(tok);
-	*/
-
-	tok = get();
-	if (tok->class != ':') {
-		printf("Error: ':' operator expected in iterator definition.\n");
-		return NULL;
-	}
-
+	expect(':', "':' operator expected in iterator definition.");
+	
 	Node *enumerable = read_enumerable_expr();
 
-	tok = get();
-	if (tok->class != ')') {
-		printf("Error: '(' expected after keyword 'for'.\n");
-		return NULL;
-	}
+	expect(')', "'(' expected after keyword 'for'.");
 
-	tok = get();
-	if (tok->class != '{') {
-		printf("Error: '{' expected after keyword 'for'.\n");
-		return NULL;
-	}
+	expect('{', "'{' expected after keyword 'for'.");
 
 	Node **for_body = (Node **) malloc(1);
 	size_t for_body_sz = 0;
@@ -886,19 +788,11 @@ static Node *read_for_stmt()
 		for_body_sz++;
 
 		if (!is_stmt_node(n)) {
-			Token_type *tok = get();
-			if (tok->class != ';') {
-				printf("Error: Missing ';'.\n");
-				return NULL;
-			}
+			expect(';', "Missing ';'.");
 		}
 	}
 
-	tok = get();
-	if (tok->class != '}') {
-		printf("Error: '}' expected after keyword 'for'.\n");
-		return NULL;
-	}
+	expect('}', "'}' expected after keyword 'for'.");
 
 	return ast_for_stmt(iterator, enumerable, for_body_sz, for_body);
 }
@@ -909,13 +803,10 @@ static Node *read_return_stmt()
 	
 	if (n == NULL) {
 		if (prev()->class != ';') {
-			printf("Error: ';' expected.\n");
+			printf("Error: Missing ';'.\n");
 		}
 	} else {
-		Token_type *tok = get();
-		if (tok->class != ';') {
-			printf("Error: ';' expected.\n");
-		}
+		expect(';', "Missing ';'.");
 	}
 
 	return ast_ret_stmt(n);
@@ -928,8 +819,7 @@ static Node *read_fn_call()
 		char *label = (char *) malloc(strlen(tok->repr));
 		strcpy(label, tok->repr);
 
-		tok = get();
-		if (tok->class == '(') {
+		if (next_token('(')) {
 			Node **args = (Node **) malloc(1);
 			size_t args_sz = 0;
 			for (;;) {
@@ -1085,8 +975,7 @@ static Node *read_additive_expr()
 static Node *read_enumerable_expr()
 {
 	Node *r;
-	Token_type *tok = get();
-	if (tok->class == '[') {
+	if (next_token('[')) {
 		r = read_array_expr();
 	} else {
 		unget();
@@ -1118,11 +1007,7 @@ static Node *read_array_expr()
 		}
 	}
 
-	tok = get();
-	if (tok->class != ']') {
-		printf("Error: Unexpected token in array expression.\n");
-		return NULL;
-	}
+	expect(']', "Unexpected token in array expression.");
 
 	return ast_arraytype(array_sz, array);
 }
