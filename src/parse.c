@@ -220,7 +220,7 @@ static void traverse(Node *root)
 			traverse(root->right);
 			break;
 		case AST_DECLARATION:
-			printf("(DECLARATION: %s | TYPE: %d) ", root->vlabel, root->vtype);
+			root->v_is_array ? printf("(ARRAY DECLARATION: %s | MEMBER TYPE: %d | ARRAY SIZE: %d) ", root->vlabel, root->vtype, root->varray_size) : printf("(PRIMITIVE DECLARATION: %s | TYPE: %d) ", root->vlabel, root->vtype);
 			break;
 		case AST_FUNCTION_DEF:
 			printf("(FUNCTION DEFINITION: %s | RETURNS: %d | PARAMS: %s | BODY: {\n", root->flabel, root->return_type, list_nodearray(root->n_params, root->fnparams));
@@ -425,9 +425,9 @@ static Node *ast_binop(int op, Node *lhs, Node *rhs)
 	}
 }
 
-static Node *ast_decl(char *label, int type)
+static Node *ast_decl(char *label, int type, int is_array, int array_size)
 {
-	return makeNode(&(Node){AST_DECLARATION, .vlabel=label, .vtype=type});
+	return makeNode(&(Node){AST_DECLARATION, .vlabel=label, .vtype=type, .v_is_array=is_array, .varray_size=array_size});
 }
  
 static Node *ast_funcdef(char *label, int ret_type, size_t params_n, size_t stmts_n, Node **params, Node **body)
@@ -918,12 +918,29 @@ static Node *read_declaration_expr()
 {
 	Token_type *tok = get();
 	int type;
+	int is_array = 0;
+	int array_size;
 	if ((type = is_type_specifier(tok))) {
 		tok = get();
 		if (tok->class == IDENTIFIER) {
 			char *label = (char *) malloc(strlen(tok->repr));
 			strcpy(label, tok->repr);
-			Node *lhs = ast_decl(label, type);
+
+			if (next_token('[')) {
+				tok = get();
+				if (tok->class == INT) {
+					char *end;
+					#define s (tok->repr)
+					array_size = strncasecmp(s, "0b", 2) ? strtol(s, &end, 0) : strtol(s, &end, 2);
+					#undef s
+					expect(']', "");
+				} else if (tok->class == ']') {
+					array_size = 0;
+				}
+				is_array = 1;
+			}
+
+			Node *lhs = ast_decl(label, type, is_array, array_size);
 
 			tok = get();
 			if (tok->class == '=') {

@@ -3,6 +3,7 @@ enum {
 	TYPE_INT,
 	TYPE_FLOAT,
 	TYPE_STRING,
+	TYPE_ARRAY,
 };
 
 enum {
@@ -68,6 +69,8 @@ typedef struct Node {
 			char *vlabel;
 			int vtype;
 			//struct Node *value;
+			int v_is_array;
+			int varray_size;
 		};
 		// function definition
 		struct {
