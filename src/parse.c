@@ -127,6 +127,7 @@ static void traverse(Node *root)
 		return;
 	}
 
+	char *s;
 	switch (root->type)
 	{	
 		case AST_IDENT:
@@ -142,7 +143,11 @@ static void traverse(Node *root)
 			printf("(STRING: %s) ", root->sval);
 			break;
 		case AST_ARRAY:
-			printf("(ARRAY: [%s]) ", list_nodearray(root->array_size, root->array_elems));
+			s = list_nodearray(root->array_size, root->array_elems);
+			printf("(ARRAY: [%s]) ", s);
+			if (s[0] != 0) {
+				free(s);
+			}
 			break;
 		case AST_ADD:
 			traverse(root->left);
@@ -223,12 +228,20 @@ static void traverse(Node *root)
 			root->v_is_array ? printf("(ARRAY DECLARATION: %s | MEMBER TYPE: %d | ARRAY SIZE: %d) ", root->vlabel, root->vtype, root->varray_size) : printf("(PRIMITIVE DECLARATION: %s | TYPE: %d) ", root->vlabel, root->vtype);
 			break;
 		case AST_FUNCTION_DEF:
-			printf("(FUNCTION DEFINITION: %s | RETURNS: %d | PARAMS: %s | BODY: {\n", root->flabel, root->return_type, list_nodearray(root->n_params, root->fnparams));
+			s = list_nodearray(root->n_params, root->fnparams);
+			printf("(FUNCTION DEFINITION: %s | RETURNS: %d | PARAMS: %s | BODY: {\n", root->flabel, root->return_type, s);
+			if (s[0] != 0) {
+				free(s);
+			}
 			list_stmts(root->n_stmts, root->fnbody);
 			printf("})");
 			break;
 		case AST_FUNCTION_CALL:
-			printf("(FUNCTION CALL: %s | ARGS: %s) ", root->call_label, list_nodearray(root->n_args, root->callargs));
+			s = list_nodearray(root->n_args, root->callargs);
+			printf("(FUNCTION CALL: %s | ARGS: %s) ", root->call_label, s);
+			if (s[0] != 0) {
+				free(s);
+			}
 			break;
 		case AST_IF_STMT:
 			printf("(IF STATEMENT | CONDITION: ");
@@ -326,11 +339,11 @@ static char *list_nodearray(size_t n, Node **buffer)
 
 				break;
 			case AST_DECLARATION:
-				char *type_s = (char *) malloc(9 + 11);
-				sprintf(type_s, "| TYPE: %d)", buffer[i]->vtype);
-				s = (char *) malloc(16 + strlen(buffer[i]->vlabel + strlen(type_s)) + 1);
+				char *type_s = (char *) malloc(10 + 11);
+				sprintf(type_s, " | TYPE: %d)", buffer[i]->vtype);
+				s = (char *) malloc(15 + strlen(buffer[i]->vlabel) + strlen(type_s) + 1);
 
-				strcpy(s, "\n\t(DECLARATION: ");
+				strcpy(s, "(DECLARATION: ");
 				strcat(s, buffer[i]->vlabel);
 				strcat(s, type_s);
 
