@@ -325,6 +325,20 @@ static char *list_nodearray(size_t n, Node **buffer)
 				ret_size += strlen(s);
 
 				break;
+			case AST_DECLARATION:
+				char *type_s = (char *) malloc(9 + 11);
+				sprintf(type_s, "| TYPE: %d)", buffer[i]->vtype);
+				s = (char *) malloc(16 + strlen(buffer[i]->vlabel + strlen(type_s)) + 1);
+
+				strcpy(s, "\n\t(DECLARATION: ");
+				strcat(s, buffer[i]->vlabel);
+				strcat(s, type_s);
+
+				ret = realloc(ret, ret_size + strlen(s) + 2);
+				strcpy(&ret[ret_size], s);
+				ret_size += strlen(s);
+
+				break;
 			case AST_FUNCTION_CALL:
 				char *label = (char *) malloc(strlen(buffer[i]->call_label));
 				strcpy(label, buffer[i]->call_label);
@@ -538,6 +552,16 @@ static Node **read_fn_parameters(size_t *n)
 
 	Token_type *tok;
 	for (;;) {
+		Node *param = read_declaration_expr();
+		
+		if (param == NULL) {
+			expect(')', "Closing ')' or type specifier expected.");
+			return NULL;
+		}
+		params = realloc(params, sizeof(Node *) * (params_sz+1));
+		params[params_sz] = param;
+		params_sz++;
+		/*
 		tok = get();
 		if (is_type_specifier(tok)) {
 			expect(IDENTIFIER, "Identifier expected after type specifier.");
@@ -552,7 +576,7 @@ static Node **read_fn_parameters(size_t *n)
 			unget();
 			expect(')', "Type specifier expected.");
 			break;
-		}
+		} */
 		tok = get();
 		if (tok->class != ',') {
 			if (tok->class == ')') {
@@ -637,6 +661,7 @@ static Node *read_expr()
 	Node *r = read_assignment_expr();
 
 	if (r == NULL) {
+		unget();
 		r = read_fn_call();
 	}
 
@@ -769,6 +794,9 @@ static Node *read_for_stmt()
 	expect(':', "':' operator expected in iterator definition.");
 	
 	Node *enumerable = read_enumerable_expr();
+	if (enumerable == NULL) {
+		printf("Error: Expected enumerable expression in 'for' statement.\n");
+	}
 
 	expect(')', "'(' expected after keyword 'for'.");
 
@@ -814,7 +842,7 @@ static Node *read_return_stmt()
 
 static Node *read_fn_call()
 {
-	Token_type *tok = prev();
+	Token_type *tok = get();
 	if (tok->class == IDENTIFIER) {
 		char *label = (char *) malloc(strlen(tok->repr));
 		strcpy(label, tok->repr);
@@ -919,7 +947,7 @@ static Node *read_declaration_expr()
 	Token_type *tok = get();
 	int type;
 	int is_array = 0;
-	int array_size;
+	int array_size = 0;
 	if ((type = is_type_specifier(tok))) {
 		tok = get();
 		if (tok->class == IDENTIFIER) {
@@ -995,7 +1023,6 @@ static Node *read_enumerable_expr()
 	if (next_token('[')) {
 		r = read_array_expr();
 	} else {
-		unget();
 		r = read_fn_call();
 	}
 	
@@ -1058,6 +1085,7 @@ static Node *read_string(Token_type *tok)
 static Node *read_ident(Token_type *tok)
 {
 	if (curr()->class == '(') {
+		unget();
 		return read_fn_call();
 	}
 	char *s = (char *) malloc(strlen(tok->repr));
