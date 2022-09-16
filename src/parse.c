@@ -338,6 +338,8 @@ static char *list_nodearray(size_t n, Node **buffer)
 				strcpy(&ret[ret_size], s);
 				ret_size += strlen(s);
 
+				free(s);
+
 				break;
 			case AST_DECLARATION:
 				char *type_s = (char *) malloc(10 + 11);
@@ -351,6 +353,8 @@ static char *list_nodearray(size_t n, Node **buffer)
 				ret = realloc(ret, ret_size + strlen(s) + 2);
 				strcpy(&ret[ret_size], s);
 				ret_size += strlen(s);
+
+				free(s);
 
 				break;
 			case AST_FUNCTION_CALL:
