@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <strings.h>
+#include <limits.h>
 
 #include "parse.h"
 #include "lex.h"
@@ -53,7 +54,7 @@ void parser_init()
 {
 	pos = 0;
 
-	Node **node_array = (Node **) malloc(1);
+	Node **node_array = malloc(0);
 	size_t array_len = 0;
 
 	for (;;) {
@@ -119,6 +120,21 @@ static int is_stmt_node(Node *n)
 		default:
 			return 0;
 	}
+}
+
+int numPlaces (int n) 
+{
+	if (n < 0) n = (n == INT_MIN) ? INT_MAX : -n;
+	if (n < 10) return 1;
+	if (n < 100) return 2;
+	if (n < 1000) return 3;
+	if (n < 10000) return 4;
+	if (n < 100000) return 5;
+	if (n < 1000000) return 6;
+	if (n < 10000000) return 7;
+	if (n < 100000000) return 8;
+	if (n < 1000000000) return 9;
+	return 10;
 }
 
 static void traverse(Node *root)
@@ -237,11 +253,13 @@ static void traverse(Node *root)
 			printf("})");
 			break;
 		case AST_FUNCTION_CALL:
-			s = list_nodearray(root->n_args, root->callargs);
-			printf("(FUNCTION CALL: %s | ARGS: %s) ", root->call_label, s);
+			printf("(FUNCTION CALL: %s | ARGS: ", root->call_label);
+			list_stmts(root->n_args, root->callargs);
+			printf(")");
+			/*
 			if (s[0] != 0) {
 				free(s);
-			}
+			} */
 			break;
 		case AST_IF_STMT:
 			printf("(IF STATEMENT | CONDITION: ");
@@ -289,7 +307,7 @@ static char *list_nodearray(size_t n, Node **buffer)
 		return "";
 	}
 
-	char *ret = (char *) malloc(1);
+	char *ret = malloc(0);
 	size_t ret_size = 0;
 
 	char *s = NULL;
@@ -298,29 +316,30 @@ static char *list_nodearray(size_t n, Node **buffer)
 		switch (buffer[i]->type)
 		{
 			case AST_IDENT:
-				ret = realloc(ret, ret_size + strlen(buffer[i]->name) + 2);
+				ret = realloc(ret, ret_size + strlen(buffer[i]->name) + 3);
 				strcpy(&ret[ret_size], buffer[i]->name);
 				ret_size += strlen(buffer[i]->name);
 				break;
 			case AST_INT:
-				s = (char *) malloc(11);	// INT_MAX has 10 digits
+				s = malloc(numPlaces(buffer[i]->ival) + 1);
+				//s = malloc(11);	// INT_MAX has 10 digits
 				sprintf(s, "%d", buffer[i]->ival);
-			        ret = realloc(ret, ret_size + strlen(s) + 2);
+			        ret = realloc(ret, ret_size + strlen(s) + 3);
 				strcpy(&ret[ret_size], s);
 				ret_size += strlen(s);
 				free(s);
 				break;
 			case AST_FLOAT:
-				s = (char *) malloc(20);
+				s = malloc(20);
 				sprintf(s, "%f", buffer[i]->fval);
-			        ret = realloc(ret, ret_size + strlen(s) + 2);
+			        ret = realloc(ret, ret_size + strlen(s) + 3);
 				strcpy(&ret[ret_size], s);
 				ret_size += strlen(s);
 				break;
 
 			case AST_STRING:
 #define sval buffer[i]->sval
-				ret = realloc(ret, ret_size + strlen(sval) + 2);
+				ret = realloc(ret, ret_size + strlen(sval) + 3);
 				strcpy(&ret[ret_size], sval);
 				ret_size += strlen(sval);
 				break;
@@ -342,9 +361,9 @@ static char *list_nodearray(size_t n, Node **buffer)
 
 				break;
 			case AST_DECLARATION:
-				char *type_s = (char *) malloc(10 + 11);
+				char *type_s = malloc(10 + 11);
 				sprintf(type_s, " | TYPE: %d)", buffer[i]->vtype);
-				s = (char *) malloc(15 + strlen(buffer[i]->vlabel) + strlen(type_s) + 1);
+				s = malloc(15 + strlen(buffer[i]->vlabel) + strlen(type_s) + 1);
 
 				strcpy(s, "(DECLARATION: ");
 				strcat(s, buffer[i]->vlabel);
@@ -358,10 +377,10 @@ static char *list_nodearray(size_t n, Node **buffer)
 
 				break;
 			case AST_FUNCTION_CALL:
-				char *label = (char *) malloc(strlen(buffer[i]->call_label));
+				char *label = malloc(strlen(buffer[i]->call_label));
 				strcpy(label, buffer[i]->call_label);
 				char *args = list_nodearray(buffer[i]->n_args, buffer[i]->callargs);
-				s = (char *) malloc(29 + strlen(label) + strlen(args) + 1);
+				s = malloc(29 + strlen(label) + strlen(args) + 1);
 
 				strcpy(s, "\n\t(FUNCTION CALL: ");
 				strcat(s+17, label);
@@ -377,7 +396,8 @@ static char *list_nodearray(size_t n, Node **buffer)
 			default:
 				printf("Printing error: Could not printf Node.\n");
 		}
-		strcpy(&ret[ret_size], ", ");
+		//strcpy(&ret[ret_size], ", ");
+		strcat(ret, ", ");
 		ret_size += 2;
 	}
 
@@ -386,7 +406,7 @@ static char *list_nodearray(size_t n, Node **buffer)
 
 static Node *makeNode(Node *tmp)
 {
-	Node *r = (Node *) malloc(sizeof(Node));
+	Node *r = malloc(sizeof(Node));
 
 	*r = *tmp;
 
@@ -533,7 +553,7 @@ static Node *read_fn_def()
 {
 	Token_type *tok = get();
 	if (tok->class == IDENTIFIER) {
-		char *flabel = (char *) malloc(strlen(tok->repr));
+		char *flabel = malloc(strlen(tok->repr) + 1);
 		strcpy(flabel, tok->repr);
 
 		expect('(', "");
@@ -565,7 +585,7 @@ static Node *read_fn_def()
 
 static Node **read_fn_parameters(size_t *n)
 {
-	Node **params = (Node **) malloc(1);
+	Node **params = malloc(0);
 	size_t params_sz = 0;
 
 	Token_type *tok;
@@ -604,13 +624,19 @@ static Node **read_fn_parameters(size_t *n)
 			break;
 		}
 	}
-	*n = params_sz;
-	return params;
+	if (params_sz == 0) {
+		*n = 0;
+		free(params);
+		return NULL;
+	} else {
+		*n = params_sz;
+		return params;
+	}
 }
 
 static Node **read_fn_body(size_t *n)
 {
-	Node **body = (Node **) malloc(1);
+	Node **body = malloc(0);
 	size_t body_sz = 0;
 
 	for (;;) {
@@ -716,7 +742,7 @@ static Node *read_if_stmt()
 
 	expect('{', "'{' expected after keyword 'if'."); 
 
-	Node **if_body = (Node **) malloc(1);
+	Node **if_body = malloc(0);
 	size_t if_body_sz = 0;
 
 	for (;;) {
@@ -737,7 +763,7 @@ static Node *read_if_stmt()
 
 	expect('}', "'}' expected after keyword 'if'.");
 
-	Node **else_body = (Node **) malloc(1);
+	Node **else_body = malloc(0);
 	size_t else_body_sz = 0;
 
 	Token_type *tok = get();
@@ -779,7 +805,7 @@ static Node *read_while_stmt()
 
 	expect('{', "'{' expected after keyword 'while'.");
 
-	Node **while_body = (Node **) malloc(1);
+	Node **while_body = malloc(0);
 	size_t while_body_sz = 0;
 
 	for (;;) {
@@ -820,7 +846,7 @@ static Node *read_for_stmt()
 
 	expect('{', "'{' expected after keyword 'for'.");
 
-	Node **for_body = (Node **) malloc(1);
+	Node **for_body = malloc(0);
 	size_t for_body_sz = 0;
 	for (;;) {
 		Node *n = read_secondary_expr();
@@ -862,11 +888,11 @@ static Node *read_fn_call()
 {
 	Token_type *tok = get();
 	if (tok->class == IDENTIFIER) {
-		char *label = (char *) malloc(strlen(tok->repr));
+		char *label = malloc(strlen(tok->repr) + 1);
 		strcpy(label, tok->repr);
 
 		if (next_token('(')) {
-			Node **args = (Node **) malloc(1);
+			Node **args = malloc(0);
 			size_t args_sz = 0;
 			for (;;) {
 				Node *arg = read_expr();
@@ -969,7 +995,7 @@ static Node *read_declaration_expr()
 	if ((type = is_type_specifier(tok))) {
 		tok = get();
 		if (tok->class == IDENTIFIER) {
-			char *label = (char *) malloc(strlen(tok->repr));
+			char *label = malloc(strlen(tok->repr) + 1);
 			strcpy(label, tok->repr);
 
 			if (next_token('[')) {
@@ -1049,7 +1075,7 @@ static Node *read_enumerable_expr()
 
 static Node *read_array_expr()
 {
-	Node **array = (Node **) malloc(1);
+	Node **array = malloc(0);
 	size_t array_sz = 0;
 	Token_type *tok;
 	for (;;) {
@@ -1094,7 +1120,7 @@ static Node *read_float(Token_type *tok)
 
 static Node *read_string(Token_type *tok)
 {
-	char *s = (char *) malloc(strlen(tok->repr));
+	char *s = malloc(strlen(tok->repr) + 1);
 	strcpy(s, tok->repr);
 
 	return ast_stringtype(s);
@@ -1106,7 +1132,7 @@ static Node *read_ident(Token_type *tok)
 		unget();
 		return read_fn_call();
 	}
-	char *s = (char *) malloc(strlen(tok->repr));
+	char *s = malloc(strlen(tok->repr) + 1);
 	strcpy(s, tok->repr);
 
 	return ast_identtype(s);

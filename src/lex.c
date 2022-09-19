@@ -292,7 +292,7 @@ void get_next_token()
 
 	Token_stream = realloc(Token_stream, sizeof(Token_type) * (Token_stream_size+1));
 	Token_stream[Token_stream_size].class = Token.class;
-	Token_stream[Token_stream_size].repr = (char *) malloc(pos - startpos);
+	Token_stream[Token_stream_size].repr = (char *) malloc((pos - startpos) + 1);
 	strcpy(Token_stream[Token_stream_size].repr, Token.repr);
 	Token_stream_size++;
 }
