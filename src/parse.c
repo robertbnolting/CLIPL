@@ -287,7 +287,8 @@ static void traverse(Node *root)
 			printf("})");
 			break;
 		case AST_FOR_STMT:
-			printf("(FOR STATEMENT | ITERATOR OF TYPE %d: %s | ENUMERABLE: ", root->for_iterator->vtype, root->for_iterator->vlabel);
+			root->for_iterator->v_is_array ? printf("(FOR STATMENT | ITERATOR OF TYPE ARRAY WITH MEMBER TYPE %d: %s | ENUMERABLE: ", root->for_iterator->vtype, root->for_iterator->vlabel)
+				: printf("(FOR STATEMENT | ITERATOR OF TYPE %d: %s | ENUMERABLE: ", root->for_iterator->vtype, root->for_iterator->vlabel);
 			traverse(root->for_enum);
 			printf("| BODY: {\n");
 			list_stmts(root->n_for_stmts, root->for_body);
@@ -1103,10 +1104,11 @@ static Node *read_indexed_array()
 static Node *read_enumerable_expr()
 {
 	Node *r;
-	if (next_token('[')) {
+	Token_type *tok = get();
+	if (tok->class == '[') {
 		r = read_array_expr();
 	} else {
-		r = read_fn_call();
+		r = read_ident(tok);
 	}
 
 	return r;
