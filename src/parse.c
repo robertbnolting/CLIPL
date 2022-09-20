@@ -48,6 +48,7 @@ static Node **read_fn_parameters();
 static Node **read_fn_body();
 
 static void traverse();
+static char *get_array_sizes();
 static char *list_nodearray();
 static void list_stmts();
 
@@ -125,7 +126,7 @@ static int is_stmt_node(Node *n)
 	}
 }
 
-int numPlaces (int n) 
+static int numPlaces (int n) 
 {
 	if (n < 0) n = (n == INT_MIN) ? INT_MAX : -n;
 	if (n < 10) return 1;
@@ -249,7 +250,11 @@ static void traverse(Node *root)
 			traverse(root->right);
 			break;
 		case AST_DECLARATION:
-			root->v_is_array ? printf("(ARRAY DECLARATION: %s | MEMBER TYPE: %d | ARRAY SIZE: %d) ", root->vlabel, root->vtype, root->varray_size) : printf("(PRIMITIVE DECLARATION: %s | TYPE: %d) ", root->vlabel, root->vtype);
+			s = get_array_sizes(root->v_array_dimensions, root->varray_size);
+			root->v_array_dimensions ? printf("(%d-D ARRAY DECLARATION: %s | MEMBER TYPE: %d | ARRAY SIZE: %s) ", root->v_array_dimensions, root->vlabel, root->vtype, s)
+			: printf("(PRIMITIVE DECLARATION: %s | TYPE: %d) ", root->vlabel, root->vtype);
+			free(s);
+
 			break;
 		case AST_FUNCTION_DEF:
 			s = list_nodearray(root->n_params, root->fnparams);
@@ -287,7 +292,7 @@ static void traverse(Node *root)
 			printf("})");
 			break;
 		case AST_FOR_STMT:
-			root->for_iterator->v_is_array ? printf("(FOR STATMENT | ITERATOR OF TYPE ARRAY WITH MEMBER TYPE %d: %s | ENUMERABLE: ", root->for_iterator->vtype, root->for_iterator->vlabel)
+			root->for_iterator->v_array_dimensions ? printf("(FOR STATMENT | ITERATOR OF TYPE %d-D ARRAY WITH MEMBER TYPE %d: %s | ENUMERABLE: ", root->for_iterator->v_array_dimensions, root->for_iterator->vtype, root->for_iterator->vlabel)
 				: printf("(FOR STATEMENT | ITERATOR OF TYPE %d: %s | ENUMERABLE: ", root->for_iterator->vtype, root->for_iterator->vlabel);
 			traverse(root->for_enum);
 			printf("| BODY: {\n");
@@ -300,6 +305,30 @@ static void traverse(Node *root)
 			printf(") ");
 			break;
 	}
+}
+
+static char *get_array_sizes(int dims, int *sizes)
+{
+	char *ret = NULL;
+	size_t ret_len = 0;
+	char *num = NULL;
+	for (int i = 0; i < dims; i++) {
+		num = malloc(numPlaces(sizes[i]) + 1);
+		sprintf(num, "%d", sizes[i]);
+		if (dims > 1 && i < dims-1) {
+			ret = realloc(ret, ret_len + strlen(num) + 2);
+			strcpy(&ret[ret_len], num);
+			strcat(ret, "x");
+			ret_len += strlen(num) + 1;
+		} else {
+			ret = realloc(ret, ret_len + strlen(num) + 1);
+			strcpy(&ret[ret_len], num);
+			ret_len += strlen(num);
+		}
+		free(num);
+	}
+
+	return ret;
 }
 
 static void list_stmts(size_t n, Node **body)
@@ -333,7 +362,7 @@ static char *list_nodearray(size_t n, Node **buffer)
 				s = malloc(numPlaces(buffer[i]->ival) + 1);
 				//s = malloc(11);	// INT_MAX has 10 digits
 				sprintf(s, "%d", buffer[i]->ival);
-			        ret = realloc(ret, ret_size + strlen(s) + 3);
+			        ret = realloc(ret, ret_size + strlen(s) + 1);
 				strcpy(&ret[ret_size], s);
 				ret_size += strlen(s);
 				free(s);
@@ -354,15 +383,14 @@ static char *list_nodearray(size_t n, Node **buffer)
 				break;
 #undef sval
 			case AST_ARRAY:
-				s = (char *) calloc(3, 1);	// "[]"
-				s[0] = '[';
+				s = (char *) malloc(2);
+				strcpy(s, "[");
 				char *elems = list_nodearray(buffer[i]->array_size, buffer[i]->array_elems);
 				s = realloc(s, strlen(elems) + 3);
-				strcat(s+1, elems);
-				s[strlen(s)] = ']';
-				s[strlen(s)] = '\0';
+				strcat(s, elems);
+				strcat(s, "]");
 
-				ret = realloc(ret, ret_size + strlen(s) + 2);
+				ret = realloc(ret, ret_size + strlen(s) + 3);
 				strcpy(&ret[ret_size], s);
 				ret_size += strlen(s);
 
@@ -491,9 +519,9 @@ static Node *ast_binop(int op, Node *lhs, Node *rhs)
 	}
 }
 
-static Node *ast_decl(char *label, int type, int is_array, int array_size)
+static Node *ast_decl(char *label, int type, int array_dims, int *array_size)
 {
-	return makeNode(&(Node){AST_DECLARATION, .vlabel=label, .vtype=type, .v_is_array=is_array, .varray_size=array_size});
+	return makeNode(&(Node){AST_DECLARATION, .vlabel=label, .vtype=type, .v_array_dimensions=array_dims, .varray_size=array_size});
 }
  
 static Node *ast_funcdef(char *label, int ret_type, size_t params_n, size_t stmts_n, Node **params, Node **body)
@@ -1005,29 +1033,34 @@ static Node *read_declaration_expr()
 {
 	Token_type *tok = get();
 	int type;
-	int is_array = 0;
-	int array_size = 0;
+	int array_dims = 0;
+	int *array_size = NULL;
 	if ((type = is_type_specifier(tok))) {
 		tok = get();
 		if (tok->class == IDENTIFIER) {
 			char *label = malloc(strlen(tok->repr) + 1);
 			strcpy(label, tok->repr);
 
-			if (next_token('[')) {
-				tok = get();
-				if (tok->class == INT) {
-					char *end;
-					#define s (tok->repr)
-					array_size = strncasecmp(s, "0b", 2) ? strtol(s, &end, 0) : strtol(s, &end, 2);
-					#undef s
-					expect(']', "");
-				} else if (tok->class == ']') {
-					array_size = 0;
+			for (;;) {
+				if (next_token('[')) {
+					array_size = realloc(array_size, sizeof(int) * (array_dims+1));
+					tok = get();
+					if (tok->class == INT) {
+						char *end;
+						#define s (tok->repr)
+						array_size[array_dims] = strncasecmp(s, "0b", 2) ? strtol(s, &end, 0) : strtol(s, &end, 2);
+						#undef s
+						expect(']', "");
+					} else if (tok->class == ']') {
+						array_size[array_dims] = 0;
+					}
+					array_dims += 1;
+				} else {
+					break;
 				}
-				is_array = 1;
 			}
 
-			Node *lhs = ast_decl(label, type, is_array, array_size);
+			Node *lhs = ast_decl(label, type, array_dims, array_size);
 
 			tok = get();
 			if (tok->class == '=') {

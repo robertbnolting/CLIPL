@@ -74,9 +74,8 @@ typedef struct Node {
 		struct {
 			char *vlabel;
 			int vtype;
-			//struct Node *value;
-			int v_is_array;
-			int varray_size;
+			int v_array_dimensions;
+			int *varray_size;
 		};
 		// function definition
 		struct {
