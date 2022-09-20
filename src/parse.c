@@ -708,8 +708,7 @@ static Node *read_primary_expr()
 
 	if (tok->class == '(') {
 		Node *r = read_expr();
-		next();
-		expect(')', "");
+		//next();
 		expect(')', "Expected ')' at end of expression.");
 		return r;
 	}
