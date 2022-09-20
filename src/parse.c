@@ -33,6 +33,7 @@ static Node *read_return_stmt();
 static Node *read_assignment_expr();
 static Node *read_relational_expr();
 static Node *read_enumerable_expr();
+static Node *read_indexed_array();
 static Node *read_additive_expr();
 static Node *read_multiplicative_expr();
 static Node *read_declaration_expr();
@@ -70,8 +71,10 @@ void parser_init()
 
 	for (int i = 0; i < array_len; i++) {
 		traverse(node_array[i]);
+		free(node_array[i]);
 		printf("\n\n");
 	}
+	free(node_array);
 }
 
 static int is_type_specifier(Token_type *tok)
@@ -164,6 +167,11 @@ static void traverse(Node *root)
 			if (s[0] != 0) {
 				free(s);
 			}
+			break;
+		case AST_IDX_ARRAY:
+			printf("(INDEXED ARRAY: %s | INDEX: ", root->ia_label);
+			traverse(root->index_value);
+			printf(") ");
 			break;
 		case AST_ADD:
 			traverse(root->left);
@@ -438,6 +446,11 @@ static Node *ast_arraytype(size_t sz, Node **arr)
 	return makeNode(&(Node){AST_ARRAY, .array_size=sz, .array_elems=arr});
 }
 
+static Node *ast_indexed_array(char *label, Node *idx)
+{
+	return makeNode(&(Node){AST_IDX_ARRAY, .ia_label=label, .index_value=idx});
+}
+
 static Node *ast_binop(int op, Node *lhs, Node *rhs)
 {
 	switch (op)
@@ -594,6 +607,7 @@ static Node **read_fn_parameters(size_t *n)
 		
 		if (param == NULL) {
 			expect(')', "Closing ')' or type specifier expected.");
+			*n = 0;
 			return NULL;
 		}
 		params = realloc(params, sizeof(Node *) * (params_sz+1));
@@ -1061,6 +1075,31 @@ static Node *read_additive_expr()
 	}
 }
 
+static Node *read_indexed_array()
+{
+	Token_type *tok = get();
+
+	char *label = malloc(strlen(tok->repr) + 1);
+	strcpy(label, tok->repr);
+	label[strlen(tok->repr)] = '\0';
+
+	expect('[', "");
+	tok = get();
+	Node *index;
+	if (tok->class == INT) {
+		index = read_int(tok);
+	} else if (tok->class == IDENTIFIER) {
+		index = read_ident(tok);
+	} else {
+		printf("Error: Invalid array index.\n");
+		exit(1);
+	}
+
+	expect(']', "");
+
+	return ast_indexed_array(label, index);
+}
+
 static Node *read_enumerable_expr()
 {
 	Node *r;
@@ -1069,7 +1108,7 @@ static Node *read_enumerable_expr()
 	} else {
 		r = read_fn_call();
 	}
-	
+
 	return r;
 }
 
@@ -1131,6 +1170,9 @@ static Node *read_ident(Token_type *tok)
 	if (curr()->class == '(') {
 		unget();
 		return read_fn_call();
+	} else if (curr()->class == '[') {
+		unget();
+		return read_indexed_array();
 	}
 	char *s = malloc(strlen(tok->repr) + 1);
 	strcpy(s, tok->repr);

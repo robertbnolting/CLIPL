@@ -19,6 +19,7 @@ enum {
 	AST_FLOAT,
 	AST_STRING,
 	AST_ARRAY,
+	AST_IDX_ARRAY,
 	AST_ADD,
 	AST_SUB,
 	AST_MUL,
@@ -58,6 +59,11 @@ typedef struct Node {
 		struct {
 			size_t array_size;
 			struct Node **array_elems;
+		};
+		// indexed array
+		struct {
+			char *ia_label;
+			struct Node *index_value;
 		};
 		// binary operator
 		struct {
