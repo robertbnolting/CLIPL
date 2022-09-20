@@ -111,7 +111,7 @@ static void handle_string()
 		last = current;
 		next_char();
 		if (is_end_of_file(current)) {
-			Error("Missing \"");
+			c_error("Missing \"");
 		}
 	}
 	Token.class = STRING;

@@ -6,6 +6,7 @@
 
 #include "parse.h"
 #include "lex.h"
+#include "error.h"
 
 static int pos;
 
@@ -569,9 +570,9 @@ static void expect(int tclass, const char *msg)
 	Token_type *tok = get();
 	if (tok->class != tclass) {
 		if (msg[0] == 0) {
-			printf("Error: Unexpected token.\n");
+			c_error("Unexpected token.");
 		} else {
-			printf("Error: %s\n", msg);
+			c_error(msg);
 		}
 
 		exit(1);
@@ -585,7 +586,7 @@ static Node *read_global_expr()
 		return read_fn_def();
 	} else {
 		if (tok->class != EoF) {
-			printf("Error: Unexpected global expression.\n");
+			c_error("Unexpected global expression.");
 		}
 		return NULL;
 	}
@@ -608,7 +609,7 @@ static Node *read_fn_def()
 		tok = get();
 		int ret_type;
 		if (!(ret_type = is_type_specifier(tok))) {
-			printf("Error: -> operator must be followed by valid type specifier.\n");
+			c_error("-> operator must be followed by valid type specifier.\n");
 			return NULL;
 		}
 
@@ -663,7 +664,7 @@ static Node **read_fn_parameters(size_t *n)
 			if (tok->class == ')') {
 				break;
 			}
-			printf("Error: ',' or ')' expected.\n");
+			c_error("',' or ')' expected.");
 			break;
 		}
 	}
@@ -881,7 +882,7 @@ static Node *read_for_stmt()
 	
 	Node *enumerable = read_enumerable_expr();
 	if (enumerable == NULL) {
-		printf("Error: Expected enumerable expression in 'for' statement.\n");
+		c_error("Expected enumerable expression in 'for' statement.");
 	}
 
 	expect(')', "'(' expected after keyword 'for'.");
@@ -917,7 +918,7 @@ static Node *read_return_stmt()
 	
 	if (n == NULL) {
 		if (prev()->class != ';') {
-			printf("Error: Missing ';'.\n");
+			c_error("Missing ';'.");
 		}
 	} else {
 		expect(';', "Missing ';'.");
@@ -953,7 +954,7 @@ static Node *read_fn_call()
 				}
 			}
 			if (tok->class != ')') {
-				printf("Error: Closing ')' expected.\n");
+				c_error("Closing ')' expected.");
 				free(label);
 				free(args);
 				return NULL;
@@ -1124,7 +1125,7 @@ static Node *read_indexed_array()
 	} else if (tok->class == IDENTIFIER) {
 		index = read_ident(tok);
 	} else {
-		printf("Error: Invalid array index.\n");
+		c_error("Invalid array index.");
 		exit(1);
 	}
 

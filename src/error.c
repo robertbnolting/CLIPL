@@ -1,8 +1,8 @@
 #include <stdio.h>
 
-#include <error.h>
+#include "error.h"
 
-void Error(char *msg)
+void c_error(const char *msg)
 {
-	printf("\x1b[31mERROR:\x1b[0m %s\n", msg);
+	printf("\x1b[31mCompile error:\x1b[0m %s\n", msg);
 }

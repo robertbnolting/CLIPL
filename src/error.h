@@ -1,1 +1,1 @@
-void Error(char *msg);
+void c_error();
