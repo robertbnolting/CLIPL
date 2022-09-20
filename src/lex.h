@@ -82,7 +82,8 @@ typedef struct
 {
 	int class;
 	char *repr;
-	File_pos pos;
+	int line;
+	//File_pos pos;
 } Token_type;
 
 extern Token_type Token;

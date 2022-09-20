@@ -570,9 +570,9 @@ static void expect(int tclass, const char *msg)
 	Token_type *tok = get();
 	if (tok->class != tclass) {
 		if (msg[0] == 0) {
-			c_error("Unexpected token.");
+			c_error("Unexpected token.", tok->line);
 		} else {
-			c_error(msg);
+			c_error(msg, tok->line);
 		}
 
 		exit(1);
@@ -586,7 +586,7 @@ static Node *read_global_expr()
 		return read_fn_def();
 	} else {
 		if (tok->class != EoF) {
-			c_error("Unexpected global expression.");
+			c_error("Unexpected global expression.", tok->line);
 		}
 		return NULL;
 	}
@@ -609,7 +609,7 @@ static Node *read_fn_def()
 		tok = get();
 		int ret_type;
 		if (!(ret_type = is_type_specifier(tok))) {
-			c_error("-> operator must be followed by valid type specifier.\n");
+			c_error("-> operator must be followed by valid type specifier.\n", tok->line);
 			return NULL;
 		}
 
@@ -664,7 +664,7 @@ static Node **read_fn_parameters(size_t *n)
 			if (tok->class == ')') {
 				break;
 			}
-			c_error("',' or ')' expected.");
+			c_error("',' or ')' expected.", tok->line);
 			break;
 		}
 	}
@@ -882,7 +882,7 @@ static Node *read_for_stmt()
 	
 	Node *enumerable = read_enumerable_expr();
 	if (enumerable == NULL) {
-		c_error("Expected enumerable expression in 'for' statement.");
+		c_error("Expected enumerable expression in 'for' statement.", curr()->line);
 	}
 
 	expect(')', "'(' expected after keyword 'for'.");
@@ -918,7 +918,7 @@ static Node *read_return_stmt()
 	
 	if (n == NULL) {
 		if (prev()->class != ';') {
-			c_error("Missing ';'.");
+			c_error("Missing ';'.", prev()->line);
 		}
 	} else {
 		expect(';', "Missing ';'.");
@@ -954,7 +954,7 @@ static Node *read_fn_call()
 				}
 			}
 			if (tok->class != ')') {
-				c_error("Closing ')' expected.");
+				c_error("Closing ')' expected.", tok->line);
 				free(label);
 				free(args);
 				return NULL;
@@ -1125,7 +1125,7 @@ static Node *read_indexed_array()
 	} else if (tok->class == IDENTIFIER) {
 		index = read_ident(tok);
 	} else {
-		c_error("Invalid array index.");
+		c_error("Invalid array index.", tok->line);
 		exit(1);
 	}
 

@@ -9,6 +9,8 @@ static char *input;
 static int pos;
 static char current;
 
+static int cur_line;
+
 #define next_char()	(current = input[++pos])
 #define ungetch()	(current = input[--pos])
 #define peek()		(input[pos+1])
@@ -24,6 +26,8 @@ void lexer_init(char *file_contents)
 	input = file_contents;
 	pos = 0;
 	current = input[pos];
+
+	cur_line = 1;
 
 	Token_stream = (Token_type *) malloc(1);
 	Token_stream_size = 0;
@@ -240,7 +244,10 @@ static void handle_separator()
 
 static void skip_layout_and_comments()
 {
-	while (is_layout(current)) { next_char(); }
+	while (is_layout(current)) { 
+		if (current == '\n') { cur_line++; }
+		next_char(); 
+	}
 	while (is_comment_starter(current)) {
 		next_char();
 		while (!is_comment_stopper(current)) {
@@ -294,5 +301,6 @@ void get_next_token()
 	Token_stream[Token_stream_size].class = Token.class;
 	Token_stream[Token_stream_size].repr = (char *) malloc((pos - startpos) + 1);
 	strcpy(Token_stream[Token_stream_size].repr, Token.repr);
+	Token_stream[Token_stream_size].line = cur_line;
 	Token_stream_size++;
 }
