@@ -1,9 +1,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "lex.h"
 #include "error.h"
+
+#define DEFAULT_INCLUDE_PATH	"/home/yog/fun/compilers/fico/include/"
 
 static char *input;
 static int pos;
@@ -16,6 +19,23 @@ static int cur_line;
 #define peek()		(input[pos+1])
 #define prev()		(input[pos-1])
 
+static char *to_zstring();
+static void skip_layout_and_comments();
+
+static void handle_identifier();
+static void handle_hex();
+static void handle_oct();
+static void handle_bin();
+static void handle_number();
+static void handle_string();
+static void handle_operator();
+static void handle_separator();
+
+static void preprocess();
+static char *read_import_directive();
+static int read_word();
+static int getNextNewlineOffset();
+
 Token_type Token;
 
 Token_type *Token_stream;
@@ -24,6 +44,12 @@ size_t Token_stream_size;
 void lexer_init(char *file_contents)
 {
 	input = file_contents;
+	
+	pos = 0;
+	current = input[pos];
+
+	preprocess(input);
+
 	pos = 0;
 	current = input[pos];
 
@@ -303,4 +329,118 @@ void get_next_token()
 	strcpy(Token_stream[Token_stream_size].repr, Token.repr);
 	Token_stream[Token_stream_size].line = cur_line;
 	Token_stream_size++;
+}
+
+static void preprocess(char *text)
+{
+	char *content = NULL;
+	for (;;) {
+		if (current == '!') {
+			int saved_pos = pos;
+			content = read_import_directive();
+			if (content != NULL) {
+				size_t input_len = strlen(input);
+				input = realloc(input, input_len + strlen(content) + 1);
+				memmove(input+saved_pos+strlen(content), input+pos, input_len-pos);
+				strncpy(input+saved_pos, content, strlen(content));
+				input[strlen(content)+(input_len-pos)] = '\0';
+			}
+		}
+		if (is_end_of_file(current)) {
+			break;
+		}
+		next_char();
+	}
+}
+
+static char *read_import_directive()
+{
+	next_char();
+
+	if (!read_word("import")) {
+		return NULL;
+	} else {
+		skip_layout_and_comments();
+		char *filename = NULL;
+		size_t filename_len = 0;
+		char *filepath = NULL;
+		while (is_letter(current) || is_digit(current) || is_underscore(current)) {
+			filename = realloc(filename, filename_len+1);
+			filename[filename_len] = current;
+			filename_len++;
+			next_char();
+		}
+		filename = realloc(filename, filename_len+1);
+		filename[filename_len] = '\0';
+		if (filename != NULL) {
+			filepath = malloc(filename_len + strlen(DEFAULT_INCLUDE_PATH) + 1);
+			strcpy(filepath, DEFAULT_INCLUDE_PATH);
+			strcat(filepath, filename);
+			//memmove(filename+strlen(DEFAULT_INCLUDE_PATH), filename, strlen(filename));
+			//strncpy(filename, DEFAULT_INCLUDE_PATH, strlen(DEFAULT_INCLUDE_PATH));
+
+			FILE *fp = fopen(filepath, "r");
+			if (fp == NULL) {
+				free(filepath);
+				char cwd[1024] = {0};
+				getcwd(cwd, sizeof(cwd));
+				filepath = malloc(filename_len + strlen(cwd) + 2);
+				strcpy(filepath, cwd);
+				strcat(filepath, "/");
+				strcat(filepath, filename);
+				//filename = realloc(filename, strlen(cwd));
+				//memmove(filename+strlen(cwd), filename, strlen(filename));
+				//strncpy(filename, cwd, strlen(cwd));
+
+				fp = fopen(filepath, "r");
+				if (fp == NULL) {
+					free(filename);
+					free(filepath);
+					c_error("Import file not found.");
+					return NULL;
+				}
+			}
+			fseek(fp, 0, SEEK_END);
+			size_t file_sz = ftell(fp);
+			fseek(fp, 0, SEEK_SET);
+
+			char *file_content = malloc(file_sz + 1);
+			fread(file_content, 1, file_sz, fp);
+			file_content[file_sz] = '\0';
+
+			free(filename);
+			fclose(fp);
+
+			return file_content;
+		} else {
+			return NULL;
+		}
+	}
+}
+
+static int read_word(char *word)
+{
+	for (int i = 0; i < strlen(word); i++) {
+		if (current != word[i]) {
+			return 0;
+		}
+		next_char();
+	}
+
+	return 1;
+}
+
+static int getNextNewlineOffset()
+{
+	int acc = 0;
+	for (;;) {
+		if (current == '\n') {
+			for (int i = 0; i < acc; i++) {
+				ungetch();
+			}
+			return acc;
+		}
+		next_char();
+		acc++;
+	}
 }

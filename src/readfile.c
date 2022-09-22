@@ -16,9 +16,11 @@ char *readFile(char *filename)
 	size_t sz = ftell(fp);
 	fseek(fp, 0, SEEK_SET);
 
-	char *file_content = (char *) malloc(sz);
+	char *file_content = malloc(sz + 1);
 
 	fread((char*) file_content, 1, sz, fp);
+
+	file_content[sz] = '\0';
 
 	return file_content;
 }
