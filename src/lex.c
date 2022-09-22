@@ -429,18 +429,3 @@ static int read_word(char *word)
 
 	return 1;
 }
-
-static int getNextNewlineOffset()
-{
-	int acc = 0;
-	for (;;) {
-		if (current == '\n') {
-			for (int i = 0; i < acc; i++) {
-				ungetch();
-			}
-			return acc;
-		}
-		next_char();
-		acc++;
-	}
-}
