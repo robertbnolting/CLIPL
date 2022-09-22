@@ -34,7 +34,6 @@ static void handle_separator();
 static void preprocess();
 static char *read_import_directive();
 static int read_word();
-static int getNextNewlineOffset();
 
 Token_type Token;
 

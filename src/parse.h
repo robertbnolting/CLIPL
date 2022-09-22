@@ -81,6 +81,7 @@ typedef struct Node {
 		struct {
 			char *flabel;
 			int return_type;
+			int ret_array_dims;
 			size_t n_params;
 			size_t n_stmts;
 			struct Node **fnparams;

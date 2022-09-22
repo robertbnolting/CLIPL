@@ -259,7 +259,8 @@ static void traverse(Node *root)
 			break;
 		case AST_FUNCTION_DEF:
 			s = list_nodearray(root->n_params, root->fnparams);
-			printf("(FUNCTION DEFINITION: %s | RETURNS: %d | PARAMS: %s | BODY: {\n", root->flabel, root->return_type, s);
+			root->ret_array_dims ? printf("(FUNCTION DEFINITION: %s | RETURNS %d-D array with member type %d | PARAMS: %s | BODY: {\n", root->flabel, root->ret_array_dims, root->return_type, s)
+			: printf("(FUNCTION DEFINITION: %s | RETURNS: %d | PARAMS: %s | BODY: {\n", root->flabel, root->return_type, s);
 			if (s[0] != 0) {
 				free(s);
 			}
@@ -525,9 +526,9 @@ static Node *ast_decl(char *label, int type, int array_dims, int *array_size)
 	return makeNode(&(Node){AST_DECLARATION, .vlabel=label, .vtype=type, .v_array_dimensions=array_dims, .varray_size=array_size});
 }
  
-static Node *ast_funcdef(char *label, int ret_type, size_t params_n, size_t stmts_n, Node **params, Node **body)
+static Node *ast_funcdef(char *label, int ret_type, int array_dims, size_t params_n, size_t stmts_n, Node **params, Node **body)
 {
-	return makeNode(&(Node){AST_FUNCTION_DEF, .flabel=label, .return_type=ret_type, .n_params=params_n, .n_stmts=stmts_n, .fnparams=params, .fnbody=body});
+	return makeNode(&(Node){AST_FUNCTION_DEF, .flabel=label, .return_type=ret_type, .ret_array_dims=array_dims, .n_params=params_n, .n_stmts=stmts_n, .fnparams=params, .fnbody=body});
 }
 
 static Node *ast_funccall(char *label, size_t nargs, Node **args)
@@ -608,9 +609,21 @@ static Node *read_fn_def()
 
 		tok = get();
 		int ret_type;
+		int array_dims = 0;
 		if (!(ret_type = is_type_specifier(tok))) {
 			c_error("-> operator must be followed by valid type specifier.\n", tok->line);
 			return NULL;
+		}
+
+		for (;;) {
+			tok = get();
+			if (tok->class == '[') {
+				expect(']', "Closing ']' expected.");
+				array_dims++;
+			} else {
+				unget();
+				break;
+			}
 		}
 
 		expect('{', "");
@@ -620,7 +633,7 @@ static Node *read_fn_def()
 
 		expect('}', "");
 
-		return ast_funcdef(flabel, ret_type, params_n, stmts_n, params, body);
+		return ast_funcdef(flabel, ret_type, array_dims, params_n, stmts_n, params, body);
 	}
 
 	return NULL;
