@@ -92,6 +92,8 @@ static int is_type_specifier(Token_type *tok)
 		return TYPE_FLOAT;
 	} else if (!strcmp(str, "string")) {
 		return TYPE_STRING;
+	} else if (!strcmp(str, "record")) {
+		return TYPE_RECORD;
 	} else {
 		return 0;
 	}
@@ -253,8 +255,14 @@ static void traverse(Node *root)
 			break;
 		case AST_DECLARATION:
 			s = get_array_sizes(root->v_array_dimensions, root->varray_size);
-			root->v_array_dimensions ? printf("(%d-D ARRAY DECLARATION: %s | MEMBER TYPE: %d | ARRAY SIZE: %s) ", root->v_array_dimensions, root->vlabel, root->vtype, s)
-			: printf("(PRIMITIVE DECLARATION: %s | TYPE: %d) ", root->vlabel, root->vtype);
+			if (root->vrlabel != NULL) {
+				root->v_array_dimensions ? printf("(%s-RECORD %d-D ARRAY DECLARATION: %s | ARRAY SIZE: %s) ", root->vrlabel, root->v_array_dimensions, root->vlabel, s)
+				: printf("(%s-RECORD DECLARATION: %s) ", root->vrlabel, root->vlabel);
+
+			} else {
+				root->v_array_dimensions ? printf("(%d-D ARRAY DECLARATION: %s | MEMBER TYPE: %d | ARRAY SIZE: %s) ", root->v_array_dimensions, root->vlabel, root->vtype, s)
+				: printf("(PRIMITIVE DECLARATION: %s | TYPE: %d) ", root->vlabel, root->vtype);
+			}
 			free(s);
 
 			break;
@@ -406,13 +414,25 @@ static char *list_nodearray(size_t n, Node **buffer)
 
 				break;
 			case AST_DECLARATION:
-				char *type_s = malloc(10 + 11);
-				sprintf(type_s, " | TYPE: %d)", buffer[i]->vtype);
-				s = malloc(15 + strlen(buffer[i]->vlabel) + strlen(type_s) + 1);
+				if (buffer[i]->vrlabel != NULL) {
+					char *rec = malloc(strlen(buffer[i]->vrlabel) + 1);
+					strcpy(rec, buffer[i]->vrlabel);
+					s = malloc(23 + strlen(buffer[i]->vlabel) + strlen(rec) + 1);
 
-				strcpy(s, "(DECLARATION: ");
-				strcat(s, buffer[i]->vlabel);
-				strcat(s, type_s);
+					strcpy(s, "(");
+					strcat(s, rec);
+					strcat(s, "-RECORD DECLARATION: ");
+					strcat(s, buffer[i]->vlabel);
+					strcat(s, ")");
+				} else {
+					char *type_s = malloc(10 + 11);
+					sprintf(type_s, " | TYPE: %d)", buffer[i]->vtype);
+					s = malloc(15 + strlen(buffer[i]->vlabel) + strlen(type_s) + 1);
+
+					strcpy(s, "(DECLARATION: ");
+					strcat(s, buffer[i]->vlabel);
+					strcat(s, type_s);
+				}
 
 				ret = realloc(ret, ret_size + strlen(s) + 2);
 				strcpy(&ret[ret_size], s);
@@ -527,9 +547,9 @@ static Node *ast_binop(int op, Node *lhs, Node *rhs)
 	}
 }
 
-static Node *ast_decl(char *label, int type, int array_dims, int *array_size)
+static Node *ast_decl(char *label, int type, char *rlabel, int array_dims, int *array_size)
 {
-	return makeNode(&(Node){AST_DECLARATION, .vlabel=label, .vtype=type, .v_array_dimensions=array_dims, .varray_size=array_size});
+	return makeNode(&(Node){AST_DECLARATION, .vlabel=label, .vtype=type, .vrlabel=rlabel, .v_array_dimensions=array_dims, .varray_size=array_size});
 }
 
 static Node *ast_record_def(char *label, size_t n_fields, Node **fields)
@@ -707,22 +727,7 @@ static Node **read_fn_parameters(size_t *n)
 		params = realloc(params, sizeof(Node *) * (params_sz+1));
 		params[params_sz] = param;
 		params_sz++;
-		/*
-		tok = get();
-		if (is_type_specifier(tok)) {
-			expect(IDENTIFIER, "Identifier expected after type specifier.");
 
-			char *pname = (char *) malloc(strlen(tok->repr));
-			strcpy(pname, tok->repr);
-			Node *param = ast_identtype(pname);
-			params = realloc(params, sizeof(Node *) * (params_sz+1));
-			params[params_sz] = param;
-			params_sz++;
-		} else {
-			unget();
-			expect(')', "Type specifier expected.");
-			break;
-		} */
 		tok = get();
 		if (tok->class != ',') {
 			if (tok->class == ')') {
@@ -1097,9 +1102,19 @@ static Node *read_declaration_expr()
 {
 	Token_type *tok = get();
 	int type;
+	char *rlabel = NULL;
 	int array_dims = 0;
 	int *array_size = NULL;
 	if ((type = is_type_specifier(tok))) {
+		if (type == TYPE_RECORD) {
+			tok = get();
+			if (tok->class == IDENTIFIER) {
+				rlabel = malloc(strlen(tok->repr) + 1);
+				strcpy(rlabel, tok->repr);
+			} else {
+				c_error("Specifier 'record' must be followed by valid label.");
+			}
+		}
 		tok = get();
 		if (tok->class == IDENTIFIER) {
 			char *label = malloc(strlen(tok->repr) + 1);
@@ -1124,7 +1139,7 @@ static Node *read_declaration_expr()
 				}
 			}
 
-			Node *lhs = ast_decl(label, type, array_dims, array_size);
+			Node *lhs = ast_decl(label, type, rlabel, array_dims, array_size);
 
 			tok = get();
 			if (tok->class == '=') {

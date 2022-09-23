@@ -4,6 +4,7 @@ enum {
 	TYPE_FLOAT,
 	TYPE_STRING,
 	TYPE_ARRAY,
+	TYPE_RECORD,
 };
 
 enum {
@@ -75,6 +76,7 @@ typedef struct Node {
 		struct {
 			char *vlabel;
 			int vtype;
+			char *vrlabel;
 			int v_array_dimensions;
 			int *varray_size;
 		};
