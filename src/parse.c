@@ -35,6 +35,7 @@ static Node *read_assignment_expr();
 static Node *read_relational_expr();
 static Node *read_enumerable_expr();
 static Node *read_indexed_array();
+static Node *read_field_access();
 static Node *read_additive_expr();
 static Node *read_multiplicative_expr();
 static Node *read_declaration_expr();
@@ -177,6 +178,9 @@ static void traverse(Node *root)
 			printf("(INDEXED ARRAY: %s | INDEX: ", root->ia_label);
 			traverse(root->index_value);
 			printf(") ");
+			break;
+		case AST_FIELD_ACCESS:
+			printf("(FIELD ACCESS | RECORD: %s | FIELD: %s) ", root->access_rlabel, root->access_field);
 			break;
 		case AST_ADD:
 			traverse(root->left);
@@ -506,6 +510,11 @@ static Node *ast_arraytype(size_t sz, Node **arr)
 static Node *ast_indexed_array(char *label, Node *idx)
 {
 	return makeNode(&(Node){AST_IDX_ARRAY, .ia_label=label, .index_value=idx});
+}
+
+static Node *ast_field_access(char *rlabel, char *field)
+{
+	return makeNode(&(Node){AST_FIELD_ACCESS, .access_rlabel=rlabel, .access_field=field});
 }
 
 static Node *ast_binop(int op, Node *lhs, Node *rhs)
@@ -1146,7 +1155,7 @@ static Node *read_declaration_expr(int no_assignment)
 				if (!no_assignment) {
 					return ast_binop('=', lhs, read_expr());
 				} else {
-					c_error("No variable assignment in function definitions or for statements.", tok->line);
+					c_error("No variable assignment in function definitions or for-statements.", tok->line);
 				}
 			} else {
 				unget();
@@ -1190,6 +1199,24 @@ static Node *read_additive_expr()
 			return r;
 		}
 	}
+}
+
+static Node *read_field_access()
+{
+	Token_type *tok = get();
+
+	char *label = malloc(strlen(tok->repr) + 1);
+	strcpy(label, tok->repr);
+	label[strlen(tok->repr)] = '\0';
+
+	next();
+
+	tok = get();
+	char *field = malloc(strlen(tok->repr) + 1);
+	strcpy(field, tok->repr);
+	field[strlen(tok->repr)] = '\0';
+
+	return ast_field_access(label, field);
 }
 
 static Node *read_indexed_array()
@@ -1279,6 +1306,7 @@ static Node *read_string(Token_type *tok)
 {
 	char *s = malloc(strlen(tok->repr) + 1);
 	strcpy(s, tok->repr);
+	s[strlen(tok->repr)] = '\0';
 
 	return ast_stringtype(s);
 }
@@ -1291,6 +1319,9 @@ static Node *read_ident(Token_type *tok)
 	} else if (curr()->class == '[') {
 		unget();
 		return read_indexed_array();
+	} else if (curr()->class == '.') {
+		unget();
+		return read_field_access();
 	}
 	char *s = malloc(strlen(tok->repr) + 1);
 	strcpy(s, tok->repr);

@@ -21,6 +21,7 @@ enum {
 	AST_STRING,
 	AST_ARRAY,
 	AST_IDX_ARRAY,
+	AST_FIELD_ACCESS,
 	AST_ADD,
 	AST_SUB,
 	AST_MUL,
@@ -66,6 +67,11 @@ typedef struct Node {
 		struct {
 			char *ia_label;
 			struct Node *index_value;
+		};
+		// field access
+		struct {
+			char *access_rlabel;
+			char *access_field;
 		};
 		// binary operator
 		struct {
