@@ -640,7 +640,7 @@ static Node *read_record_def()
 		size_t n_fields = 0;
 
 		for (;;) {
-			Node *f = read_declaration_expr();
+			Node *f = read_declaration_expr(0);
 			if (f == NULL) {
 				c_error("Invalid expression in record fields declaration.");
 			}
@@ -717,7 +717,7 @@ static Node **read_fn_parameters(size_t *n)
 
 	Token_type *tok;
 	for (;;) {
-		Node *param = read_declaration_expr();
+		Node *param = read_declaration_expr(1);
 		
 		if (param == NULL) {
 			expect(')', "Closing ')' or type specifier expected.");
@@ -803,7 +803,7 @@ static Node *read_secondary_expr()
 {
 	Node *r = read_stmt();
 	if (r == NULL) {
-		r = read_declaration_expr();
+		r = read_declaration_expr(0);
 	}
 	if (r == NULL) {
 		r = read_expr();
@@ -945,7 +945,7 @@ static Node *read_for_stmt()
 {
 	expect('(', "'(' expected after keyword 'for'.");
 
-	Node *iterator = read_declaration_expr();
+	Node *iterator = read_declaration_expr(1);
 
 	expect(':', "':' operator expected in iterator definition.");
 	
@@ -1098,7 +1098,7 @@ static Node *read_relational_expr()
 	}
 }
 
-static Node *read_declaration_expr()
+static Node *read_declaration_expr(int no_assignment)
 {
 	Token_type *tok = get();
 	int type;
@@ -1143,7 +1143,11 @@ static Node *read_declaration_expr()
 
 			tok = get();
 			if (tok->class == '=') {
-				return ast_binop('=', lhs, read_expr());
+				if (!no_assignment) {
+					return ast_binop('=', lhs, read_expr());
+				} else {
+					c_error("No variable assignment in function definitions or for statements.", tok->line);
+				}
 			} else {
 				unget();
 				return lhs;
