@@ -36,6 +36,7 @@ enum {
 	AST_GE,
 	AST_LE,
 	AST_DECLARATION,
+	AST_RECORD_DEF,
 	AST_FUNCTION_DEF,
 	AST_FUNCTION_CALL,
 	AST_IF_STMT,
@@ -76,6 +77,12 @@ typedef struct Node {
 			int vtype;
 			int v_array_dimensions;
 			int *varray_size;
+		};
+		// record definition
+		struct {
+			char *rlabel;
+			size_t n_rfields;
+			struct Node **rfields;
 		};
 		// function definition
 		struct {

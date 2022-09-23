@@ -43,6 +43,7 @@ static Node *read_int();
 static Node *read_float();
 static Node *read_string();
 static Node *read_array_expr();
+static Node *read_record_def();
 static Node *read_fn_def();
 static Node *read_fn_call();
 static Node **read_fn_parameters();
@@ -256,6 +257,11 @@ static void traverse(Node *root)
 			: printf("(PRIMITIVE DECLARATION: %s | TYPE: %d) ", root->vlabel, root->vtype);
 			free(s);
 
+			break;
+		case AST_RECORD_DEF:
+			printf("(RECORD DEFINITION: %s | FIELDS: {\n", root->rlabel);
+			list_stmts(root->n_rfields, root->rfields);
+			printf("})");
 			break;
 		case AST_FUNCTION_DEF:
 			s = list_nodearray(root->n_params, root->fnparams);
@@ -525,6 +531,11 @@ static Node *ast_decl(char *label, int type, int array_dims, int *array_size)
 {
 	return makeNode(&(Node){AST_DECLARATION, .vlabel=label, .vtype=type, .v_array_dimensions=array_dims, .varray_size=array_size});
 }
+
+static Node *ast_record_def(char *label, size_t n_fields, Node **fields)
+{
+	return makeNode(&(Node){AST_RECORD_DEF, .rlabel=label, .n_rfields=n_fields, .rfields=fields});
+}
  
 static Node *ast_funcdef(char *label, int ret_type, int array_dims, size_t params_n, size_t stmts_n, Node **params, Node **body)
 {
@@ -585,10 +596,50 @@ static Node *read_global_expr()
 	Token_type *tok = get();
 	if (!strcmp(tok->repr, "fn")) {
 		return read_fn_def();
+	} else if (!strcmp(tok->repr, "record")) {
+		return read_record_def();
 	} else {
 		if (tok->class != EoF) {
 			c_error("Unexpected global expression.", tok->line);
 		}
+		return NULL;
+	}
+}
+
+static Node *read_record_def()
+{
+	Token_type *tok = get();
+
+	if (tok->class == IDENTIFIER) {
+		char *label = malloc(strlen(tok->repr) + 1);
+		strcpy(label, tok->repr);
+
+		expect('{', "");
+
+		Node **fields = NULL;
+		size_t n_fields = 0;
+
+		for (;;) {
+			Node *f = read_declaration_expr();
+			if (f == NULL) {
+				c_error("Invalid expression in record fields declaration.");
+			}
+
+			fields = realloc(fields, sizeof(Node *) * (n_fields+1));
+			fields[n_fields] = f;
+			n_fields++;
+
+			tok = get();
+			if (tok->class != ',') {
+				if (tok->class != '}') {
+					c_error("Fields in records must be separated by ',' character.", tok->line);
+				} else {
+					expect(';', "");
+					return ast_record_def(label, n_fields, fields);
+				}
+			}
+		}
+	} else {
 		return NULL;
 	}
 }
