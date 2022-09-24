@@ -180,7 +180,11 @@ static void traverse(Node *root)
 			printf(") ");
 			break;
 		case AST_FIELD_ACCESS:
-			printf("(FIELD ACCESS | RECORD: %s | FIELD: %s) ", root->access_rlabel, root->access_field);
+			printf("(FIELD ACCESS | RECORD: ");
+			traverse(root->access_rlabel);
+			printf("| FIELD: ");
+			traverse(root->access_field);
+			printf(")");
 			break;
 		case AST_ADD:
 			traverse(root->left);
@@ -512,7 +516,7 @@ static Node *ast_indexed_array(char *label, Node *idx)
 	return makeNode(&(Node){AST_IDX_ARRAY, .ia_label=label, .index_value=idx});
 }
 
-static Node *ast_field_access(char *rlabel, char *field)
+static Node *ast_field_access(Node *rlabel, Node *field)
 {
 	return makeNode(&(Node){AST_FIELD_ACCESS, .access_rlabel=rlabel, .access_field=field});
 }
@@ -800,7 +804,7 @@ static Node *read_primary_expr()
 	switch (tok->class) {
 		case INT: return read_int(tok);
 		case FLOAT: return read_float(tok);
-		case IDENTIFIER: return read_ident(tok);
+		case IDENTIFIER: return read_ident(tok, 0);
 		case STRING: return read_string(tok);
 		default: 
 			     unget();
@@ -1168,16 +1172,31 @@ static Node *read_declaration_expr(int no_assignment)
 	return NULL;
 }
 
-static Node *read_multiplicative_expr()
+static Node *read_field_access()
 {
 	Node *r = read_primary_expr();
 
 	for (;;) {
+		if (curr()->class == '.') {
+			next();
+			Token_type *tok = get();
+			r = ast_field_access(r, read_ident(tok, 1));
+		} else {
+			return r;
+		}
+	}
+}
+
+static Node *read_multiplicative_expr()
+{
+	Node *r = read_field_access();
+
+	for (;;) {
 		if (curr()->class == '*') {
-			pos++;
+			next();
 			r = ast_binop('*', r, read_primary_expr());
 		} else if (curr()->class == '/') {
-			pos++;
+			next();
 			r = ast_binop('/', r, read_primary_expr());
 		} else {
 			return r;
@@ -1190,33 +1209,15 @@ static Node *read_additive_expr()
 	Node *r = read_multiplicative_expr();
 	for (;;) {
 		if (curr()->class == '+') {
-			pos++;
+			next();
 			r = ast_binop('+', r, read_multiplicative_expr());
 		} else if (curr()->class == '-') {
-			pos++;
+			next();
 			r = ast_binop('-', r, read_multiplicative_expr());
 		} else {
 			return r;
 		}
 	}
-}
-
-static Node *read_field_access()
-{
-	Token_type *tok = get();
-
-	char *label = malloc(strlen(tok->repr) + 1);
-	strcpy(label, tok->repr);
-	label[strlen(tok->repr)] = '\0';
-
-	next();
-
-	tok = get();
-	char *field = malloc(strlen(tok->repr) + 1);
-	strcpy(field, tok->repr);
-	field[strlen(tok->repr)] = '\0';
-
-	return ast_field_access(label, field);
 }
 
 static Node *read_indexed_array()
@@ -1233,7 +1234,7 @@ static Node *read_indexed_array()
 	if (tok->class == INT) {
 		index = read_int(tok);
 	} else if (tok->class == IDENTIFIER) {
-		index = read_ident(tok);
+		index = read_ident(tok, 0);
 	} else {
 		c_error("Invalid array index.", tok->line);
 		exit(1);
@@ -1251,7 +1252,7 @@ static Node *read_enumerable_expr()
 	if (tok->class == '[') {
 		r = read_array_expr();
 	} else {
-		r = read_ident(tok);
+		r = read_ident(tok, 0);
 	}
 
 	return r;
@@ -1311,19 +1312,20 @@ static Node *read_string(Token_type *tok)
 	return ast_stringtype(s);
 }
 
-static Node *read_ident(Token_type *tok)
+static Node *read_ident(Token_type *tok, int no_brackets)
 {
-	if (curr()->class == '(') {
-		unget();
-		return read_fn_call();
-	} else if (curr()->class == '[') {
-		unget();
-		return read_indexed_array();
-	} else if (curr()->class == '.') {
-		unget();
-		return read_field_access();
+	char *s;
+	if (!no_brackets) {
+		if (curr()->class == '(') {
+			unget();
+			return read_fn_call();
+		} else if (curr()->class == '[') {
+			unget();
+			return read_indexed_array();
+		}
 	}
-	char *s = malloc(strlen(tok->repr) + 1);
+
+	s = malloc(strlen(tok->repr) + 1);
 	strcpy(s, tok->repr);
 
 	return ast_identtype(s);

@@ -70,8 +70,8 @@ typedef struct Node {
 		};
 		// field access
 		struct {
-			char *access_rlabel;
-			char *access_field;
+			struct Node *access_rlabel;
+			struct Node *access_field;
 		};
 		// binary operator
 		struct {
