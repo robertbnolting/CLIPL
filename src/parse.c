@@ -655,22 +655,16 @@ static Node *read_record_def()
 		for (;;) {
 			Node *f = read_declaration_expr(0);
 			if (f == NULL) {
-				c_error("Invalid expression in record fields declaration.");
+				expect('}', "Invalid expression in record fields declaration.");
+				expect(';', "");
+				return ast_record_def(label, n_fields, fields);
 			}
 
 			fields = realloc(fields, sizeof(Node *) * (n_fields+1));
 			fields[n_fields] = f;
 			n_fields++;
 
-			tok = get();
-			if (tok->class != ',') {
-				if (tok->class != '}') {
-					c_error("Fields in records must be separated by ',' character.", tok->line);
-				} else {
-					expect(';', "");
-					return ast_record_def(label, n_fields, fields);
-				}
-			}
+			expect(';', "");
 		}
 	} else {
 		return NULL;
