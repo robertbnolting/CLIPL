@@ -124,7 +124,6 @@ static int is_stmt_node(Node *n)
 		case AST_IF_STMT:
 		case AST_WHILE_STMT:
 		case AST_FOR_STMT:
-		case AST_RETURN_STMT:
 			return 1;
 		default:
 			return 0;
@@ -175,9 +174,9 @@ static void traverse(Node *root)
 			}
 			break;
 		case AST_IDX_ARRAY:
-			printf("(INDEXED ARRAY: %s | INDEX: ", root->ia_label);
+			printf("(INDEXED ARRAY: %s | INDEX: [", root->ia_label);
 			traverse(root->index_value);
-			printf(") ");
+			printf("]) ");
 			break;
 		case AST_FIELD_ACCESS:
 			printf("(FIELD ACCESS | RECORD: ");
@@ -993,7 +992,7 @@ static Node *read_return_stmt()
 	Node *n = read_expr();
 	
 	if (n == NULL) {
-		if (prev()->class != ';') {
+		if (curr()->class != ';') {
 			c_error("Missing ';'.", prev()->line);
 		}
 	} else {
@@ -1223,16 +1222,20 @@ static Node *read_indexed_array()
 	label[strlen(tok->repr)] = '\0';
 
 	expect('[', "");
-	tok = get();
-	Node *index;
+	Node *index = read_expr();
+
+	if (index == NULL) {
+		c_error("Invalid array index.", tok->line);
+	}
+
+	/*
 	if (tok->class == INT) {
 		index = read_int(tok);
 	} else if (tok->class == IDENTIFIER) {
 		index = read_ident(tok, 0);
 	} else {
 		c_error("Invalid array index.", tok->line);
-		exit(1);
-	}
+	} */
 
 	expect(']', "");
 
