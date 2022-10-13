@@ -46,6 +46,7 @@ void lexer_init(char *file_contents)
 	
 	pos = 0;
 	current = input[pos];
+	cur_line = 1;
 
 	preprocess(input);
 
@@ -140,7 +141,7 @@ static void handle_string()
 		last = current;
 		next_char();
 		if (is_end_of_file(current)) {
-			c_error("Missing \"");
+			token_error("Missing '\"'.", cur_line);
 		}
 	}
 	Token.class = STRING;
@@ -348,6 +349,9 @@ static void preprocess(char *text)
 		if (is_end_of_file(current)) {
 			break;
 		}
+		if (current == '\n') {
+			cur_line++;
+		}
 		next_char();
 	}
 }
@@ -395,7 +399,7 @@ static char *read_import_directive()
 				if (fp == NULL) {
 					free(filename);
 					free(filepath);
-					c_error("Import file not found.");
+					file_error("Import file not found.", cur_line);
 					return NULL;
 				}
 			}
