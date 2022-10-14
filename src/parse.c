@@ -208,7 +208,7 @@ static void traverse(Node *root)
 			printf("(STRING: %s) ", root->sval);
 			break;
 		case AST_BOOL:
-			root->bval ? printf("(BOOLEAN: True) ") : printf("(BOOLEAN: False) ");
+			root->bval ? printf("(BOOLEAN: true) ") : printf("(BOOLEAN: false) ");
 			break;
 		case AST_ARRAY:
 			s = list_nodearray(root->array_size, root->array_elems);
@@ -1388,10 +1388,10 @@ static Node *read_ident(Token_type *tok, int no_brackets)
 		}
 	}
 
-	if (!strcmp(tok->repr, "True")) {
+	if (!strcmp(tok->repr, "true")) {
 		return ast_booltype(1);
 	}
-	if (!strcmp(tok->repr, "False")) {
+	if (!strcmp(tok->repr, "false")) {
 		return ast_booltype(0);
 	}
 
