@@ -1,5 +1,5 @@
 compile
 a.out
-^input
+input*
 example_input
-^test
+test*
