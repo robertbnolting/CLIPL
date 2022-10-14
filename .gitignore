@@ -1,6 +1,5 @@
 compile
-test.c
 a.out
-input.txt
-input
+^input
 example_input
+^test
