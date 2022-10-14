@@ -55,6 +55,8 @@ static char *get_array_sizes();
 static char *list_nodearray();
 static void list_stmts();
 
+static const char *tokenclassToString();
+
 void parser_init()
 {
 	pos = 0;
@@ -127,6 +129,43 @@ static int is_stmt_node(Node *n)
 			return 1;
 		default:
 			return 0;
+	}
+}
+
+static const char *tokenclassToString(int tclass)
+{
+	switch (tclass)
+	{
+		case EoF:
+			return "End of File";
+		case IDENTIFIER:
+			return "Identifier";
+		case INT:
+			return "Integer";
+		case FLOAT:
+			return "Float";
+		case STRING:
+			return "String";
+		case EQ:
+			return "==";
+		case NE:
+			return "!=";
+		case GE:
+			return ">=";
+		case LE:
+			return "<=";
+		case ADD_ASSIGN:
+			return "+=";
+		case SUB_ASSIGN:
+			return "-=";
+		case MUL_ASSIGN:
+			return "*=";
+		case DIV_ASSIGN:
+			return "/=";
+		case ARROW_OP:
+			return "->";
+		default:
+			return "Unknown token";
 	}
 }
 
@@ -614,7 +653,24 @@ static void expect(int tclass, const char *msg)
 	Token_type *tok = get();
 	if (tok->class != tclass) {
 		if (msg[0] == 0) {
-			c_error("Unexpected token.", tok->line);
+			char errmsg[128];
+			if (tclass < 256) {
+				if (tok->class < 256) {
+					sprintf(errmsg, "%c expected but got %c.", tclass, tok->class);
+					c_error(errmsg, tok->line);
+				} else {
+					sprintf(errmsg, "%c expected but got %s.", tclass, tokenclassToString(tok->class));
+					c_error(errmsg, tok->line);
+				}
+			} else {
+				if (tok->class < 256) {
+					sprintf(errmsg, "%s expected but got %c.", tokenclassToString(tclass), tok->class);
+					c_error(errmsg, tok->line);
+				} else {
+					sprintf(errmsg, "%s expected but got %s.", tokenclassToString(tclass), tokenclassToString(tok->class));
+					c_error(errmsg, tok->line);
+				}
+			}
 		} else {
 			c_error(msg, tok->line);
 		}
