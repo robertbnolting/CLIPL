@@ -97,6 +97,8 @@ static int is_type_specifier(Token_type *tok)
 		return TYPE_STRING;
 	} else if (!strcmp(str, "record")) {
 		return TYPE_RECORD;
+	} else if (!strcmp(str, "bool")) {
+		return TYPE_BOOL;
 	} else {
 		return 0;
 	}
@@ -204,6 +206,9 @@ static void traverse(Node *root)
 			break;
 		case AST_STRING:
 			printf("(STRING: %s) ", root->sval);
+			break;
+		case AST_BOOL:
+			root->bval ? printf("(BOOLEAN: True) ") : printf("(BOOLEAN: False) ");
 			break;
 		case AST_ARRAY:
 			s = list_nodearray(root->array_size, root->array_elems);
@@ -542,6 +547,11 @@ static Node *ast_identtype(char *n)
 static Node *ast_stringtype(char *val)
 {
 	return makeNode(&(Node){AST_STRING, .sval = val});
+}
+
+static Node *ast_booltype(int val)
+{
+	return makeNode(&(Node){AST_BOOL, .bval = val});
 }
 
 static Node *ast_arraytype(size_t sz, Node **arr)
@@ -1376,6 +1386,13 @@ static Node *read_ident(Token_type *tok, int no_brackets)
 			unget();
 			return read_indexed_array();
 		}
+	}
+
+	if (!strcmp(tok->repr, "True")) {
+		return ast_booltype(1);
+	}
+	if (!strcmp(tok->repr, "False")) {
+		return ast_booltype(0);
 	}
 
 	s = malloc(strlen(tok->repr) + 1);

@@ -3,6 +3,7 @@ enum {
 	TYPE_INT,
 	TYPE_FLOAT,
 	TYPE_STRING,
+	TYPE_BOOL,
 	TYPE_ARRAY,
 	TYPE_RECORD,
 };
@@ -19,6 +20,7 @@ enum {
 	AST_INT,
 	AST_FLOAT,
 	AST_STRING,
+	AST_BOOL,
 	AST_ARRAY,
 	AST_IDX_ARRAY,
 	AST_FIELD_ACCESS,
@@ -58,6 +60,8 @@ typedef struct Node {
 		float fval;
 		// string
 		char *sval;
+		// bool
+		int bval;
 		// array
 		struct {
 			size_t array_size;
