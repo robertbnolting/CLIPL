@@ -47,10 +47,14 @@ enum {
 	AST_WHILE_STMT,
 	AST_FOR_STMT,
 	AST_RETURN_STMT,
+	CFG_AUXILIARY_NODE,
+	// only necessary for printing cfg
+	CFG_JOIN_NODE,
 };
 
 typedef struct Node {
 	int type;
+	struct Node *successor;
 	union {
 		// identifier
 		char *name;
@@ -119,6 +123,8 @@ typedef struct Node {
 			size_t n_else_stmts;
 			struct Node **if_body;
 			struct Node **else_body;
+			// cfg
+			struct Node *false_successor;
 		};
 		// while statement
 		struct {

@@ -5,8 +5,13 @@
 
 void c_error(const char *msg, int line)
 {
-	printf("\x1b[91mCompile error\x1b[0m in line %d: %s\n", line, msg);
-	exit(1);
+	if (line > 0) {
+		printf("\x1b[91mCompile error\x1b[0m in line %d: %s\n", line, msg);
+		exit(1);
+	} else {
+		printf("\x1b[91mCompile error\x1b[0m: %s\n", msg);
+		exit(1);
+	}
 }
 
 void token_error(const char *msg, int line)

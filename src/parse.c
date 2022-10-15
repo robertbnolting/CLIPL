@@ -8,6 +8,9 @@
 #include "lex.h"
 #include "error.h"
 
+#define AST_OUTPUT 1
+#define CFG_OUTPUT 0
+
 static int pos;
 
 #define curr()	(&Token_stream[pos])
@@ -20,6 +23,7 @@ static int pos;
 static int next_token();
 static void expect();
 
+// AST generation
 static Node *read_global_expr();
 static Node *read_primary_expr();
 static Node *read_secondary_expr();
@@ -50,12 +54,27 @@ static Node *read_fn_call();
 static Node **read_fn_parameters();
 static Node **read_fn_body();
 
+// AST traversal
 static void traverse();
 static char *get_array_sizes();
 static char *list_nodearray();
 static void list_stmts();
 
+// CFG generation
+static Node *cfg_aux_node();
+static Node *cfg_join_node();
+
+static Node *thread_ast();
+
+// CFG traversal
+static Node *printCFG();
+static void printNode();
+
 static const char *tokenclassToString();
+
+// Parser start
+static Node **global_functions;
+static size_t global_function_count;
 
 void parser_init()
 {
@@ -75,12 +94,44 @@ void parser_init()
 		}
 	}
 
+	global_functions = node_array;
+	global_function_count = array_len;
+
+	Node *cfg_array = thread_ast();
+
+#if CFG_OUTPUT
+	printCFG(cfg_array);
+	printf("\n");
+#endif
+
+#if AST_OUTPUT
 	for (int i = 0; i < array_len; i++) {
 		traverse(node_array[i]);
 		free(node_array[i]);
 		printf("\n\n");
 	}
 	free(node_array);
+#endif
+}
+
+static Node *printCFG(Node *start)
+{	
+	Node *last = start;
+	while (last != NULL) {
+		printNode(last);
+		if (last->type == AST_IF_STMT) {
+			printf("\tTHEN: ");
+			printCFG(last->successor);
+			printf("\tELSE: ");
+			last = printCFG(last->false_successor)->successor;
+		} else if (last->type == CFG_JOIN_NODE) {
+			return last;
+		} else {
+			last = last->successor;
+		}
+	}
+
+	return NULL;
 }
 
 static int is_type_specifier(Token_type *tok)
@@ -128,6 +179,7 @@ static int is_stmt_node(Node *n)
 		case AST_IF_STMT:
 		case AST_WHILE_STMT:
 		case AST_FOR_STMT:
+		case AST_RETURN_STMT:
 			return 1;
 		default:
 			return 0;
@@ -184,6 +236,92 @@ static int numPlaces (int n)
 	if (n < 100000000) return 8;
 	if (n < 1000000000) return 9;
 	return 10;
+}
+
+static void printNode(Node *n)
+{
+	if (n == NULL) {
+		return;
+	}
+	switch (n->type)
+	{
+		case AST_IDENT:
+			printf("(IDENT: %s) ", n->name);
+			break;
+		case AST_INT:
+			printf("(INT: %d) ", n->ival);
+			break;
+		case AST_FLOAT:
+			printf("(FLOAT: %f) ", n->fval);
+			break;
+		case AST_STRING:
+			printf("(STRING: %s) ", n->sval);
+			break;
+		case AST_BOOL:
+			n->bval ? printf("(BOOLEAN: true) ") : printf("(BOOLEAN: false) ");
+			break;
+		case AST_FIELD_ACCESS:
+			printf("(FIELD ACCESS: %s.%s) ", n->access_rlabel->name, n->access_field->name);
+			break;
+		case AST_DECLARATION:
+			printf("(%d-DECLARATION: %s) ", n->vtype, n->vlabel);
+			break;
+		case AST_RETURN_STMT:
+			printf("(RETURN)");
+			break;
+		case AST_FUNCTION_CALL:
+			printf("(CALL %s)\n", n->call_label);
+			break;
+
+		case AST_ADD:
+			printf("(+)\n");
+			break;
+		case AST_SUB:
+			printf("(-)\n");
+			break;
+		case AST_MUL:
+			printf("(*)\n");
+			break;
+		case AST_DIV:
+			printf("(/)\n");
+			break;
+		case AST_ASSIGN:
+			printf("(=)\n");
+			break;
+		case AST_ADD_ASSIGN:
+			printf("(+=)\n");
+			break;
+		case AST_SUB_ASSIGN:
+			printf("(-=)\n");
+			break;
+		case AST_MUL_ASSIGN:
+			printf("(*=)\n");
+			break;
+		case AST_DIV_ASSIGN:
+			printf("(/=)\n");
+			break;
+		case AST_GT:
+			printf("(>)\n");
+			break;
+		case AST_LT:
+			printf("(<)\n");
+			break;
+		case AST_EQ:
+			printf("(==)\n");
+			break;
+		case AST_NE:
+			printf("(!=)\n");
+			break;
+		case AST_GE:
+			printf("(>=)\n");
+			break;
+		case AST_LE:
+			printf("(<=)\n");
+			break;
+		case AST_IF_STMT:
+			printf("(IF)\n");
+			break;
+	}
 }
 
 static void traverse(Node *root)
@@ -1061,6 +1199,7 @@ static Node *read_return_stmt()
 		if (curr()->class != ';') {
 			c_error("Missing ';'.", prev()->line);
 		}
+		next();
 	} else {
 		expect(';', "Missing ';'.");
 	}
@@ -1236,7 +1375,7 @@ static Node *read_field_access()
 	Node *r = read_primary_expr();
 
 	for (;;) {
-		if (curr()->class == '.') {
+		if (curr()->class == '.' && r->type == AST_IDENT) {
 			next();
 			Token_type *tok = get();
 			r = ast_field_access(r, read_ident(tok, 1));
@@ -1399,4 +1538,136 @@ static Node *read_ident(Token_type *tok, int no_brackets)
 	strcpy(s, tok->repr);
 
 	return ast_identtype(s);
+}
+
+static Node *find_function(char *name)
+{
+	for (int i = 0; i < global_function_count; i++) {
+		if(!strcmp(global_functions[i]->flabel, name)) {
+			return global_functions[i];
+		}
+	}
+
+	return NULL;
+}
+
+static Node *cfg_aux_node()
+{
+	return makeNode(&(Node){CFG_AUXILIARY_NODE});
+}
+
+static Node *cfg_join_node()
+{
+	return makeNode(&(Node){CFG_JOIN_NODE});
+}
+
+static Node *last_node;
+static void thread_expression();
+
+static Node *thread_ast()
+{
+	Node tmp;
+
+	last_node = &tmp;
+
+	for (int i = 0; i < global_function_count; i++) {
+		if (!strcmp(global_functions[i]->flabel, "main")) {
+			thread_expression(global_functions[i]);
+			last_node->successor = NULL;
+			return tmp.successor;
+		}
+	}
+	
+	c_error("No main function defined.");
+	return 0;
+}
+
+static void thread_block(Node **block, size_t block_size)
+{
+	for (int i = 0; i < block_size; i++) {
+		thread_expression(block[i]);
+		if (block[i]->type == AST_RETURN_STMT) {
+			break;	// dead-code elimination
+		}
+	}
+}
+
+static void thread_expression(Node *expr)
+{
+	switch (expr->type)
+	{
+		case AST_FUNCTION_DEF:
+			thread_block(expr->fnbody, expr->n_stmts);
+			break;
+		case AST_IDENT:
+		case AST_INT:
+		case AST_FLOAT:
+		case AST_STRING:
+		case AST_BOOL:
+		case AST_ARRAY:
+		case AST_IDX_ARRAY:
+		case AST_FIELD_ACCESS:
+		case AST_DECLARATION:
+			last_node->successor = expr;
+			last_node = expr;
+			break;
+		case AST_ADD:
+		case AST_SUB:
+		case AST_MUL:
+		case AST_DIV:
+		case AST_ASSIGN:
+		case AST_ADD_ASSIGN:
+		case AST_SUB_ASSIGN:
+		case AST_MUL_ASSIGN:
+		case AST_DIV_ASSIGN:
+		case AST_GT:
+		case AST_LT:
+		case AST_EQ:
+		case AST_NE:
+		case AST_GE:
+		case AST_LE:
+			thread_expression(expr->left);
+			thread_expression(expr->right);
+			last_node->successor = expr;
+			last_node = expr;
+			break;
+		case AST_IF_STMT:
+			thread_expression(expr->if_cond);
+			last_node->successor = expr;
+
+			Node *end_if = cfg_join_node();
+			Node *aux = cfg_aux_node();
+
+			last_node = aux;
+			thread_block(expr->if_body, expr->n_if_stmts);
+			
+			expr->successor = aux->successor;
+			last_node->successor = end_if;
+
+			last_node = aux;
+			thread_block(expr->else_body, expr->n_else_stmts);
+
+			expr->false_successor = aux->successor;
+			last_node->successor = end_if;
+
+			last_node = end_if;
+
+			break;
+		case AST_FUNCTION_CALL:
+			Node *func = find_function(expr->call_label);
+			if (func == NULL) {
+				char msg[128];
+				sprintf(msg, "No function with name '%s' was found.", expr->call_label);
+				c_error(msg, -1);
+			}
+			last_node->successor = expr;
+			last_node = expr;
+			thread_expression(func);
+			break;
+		case AST_RETURN_STMT:
+			last_node->successor = expr;
+			last_node = expr;
+			thread_expression(expr->retval);
+			break;
+	}
 }
