@@ -68,6 +68,25 @@ static char *to_zstring(int start, int len)
 	return ret;
 }
 
+static int is_type_specifier(char *str)
+{
+	if (!strcmp(str, "void")) {
+		return 1;
+	} else if (!strcmp(str, "int")) {
+		return 1;
+	} else if (!strcmp(str, "float")) {
+		return 1;
+	} else if (!strcmp(str, "string")) {
+		return 1;
+	} else if (!strcmp(str, "record")) {
+		return 1;
+	} else if (!strcmp(str, "bool")) {
+		return 1;
+	} else {
+		return 0;
+	}
+}
+
 static void handle_identifier()
 {
 	while (is_letter(current) || is_digit(current) || is_underscore(current)) {
@@ -322,6 +341,12 @@ void get_next_token()
 	}
 
 	Token.repr = to_zstring(startpos, pos - startpos);
+
+	if (is_type_specifier(Token.repr)) {
+		Token.class = TYPE_SPECIFIER;
+	} else if (!strcmp(Token.repr, "true") || !strcmp(Token.repr, "false")) {
+		Token.class = BOOL;
+	}
 
 	Token_stream = realloc(Token_stream, sizeof(Token_type) * (Token_stream_size+1));
 	Token_stream[Token_stream_size].class = Token.class;

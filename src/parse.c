@@ -47,6 +47,7 @@ static Node *read_ident();
 static Node *read_int();
 static Node *read_float();
 static Node *read_string();
+static Node *read_bool();
 static Node *read_array_expr();
 static Node *read_record_def();
 static Node *read_fn_def();
@@ -134,7 +135,7 @@ static Node *printCFG(Node *start)
 	return NULL;
 }
 
-static int is_type_specifier(Token_type *tok)
+static int get_type_specifier(Token_type *tok)
 {
 	char *str = tok->repr;
 
@@ -200,6 +201,10 @@ static const char *tokenclassToString(int tclass)
 			return "Float";
 		case STRING:
 			return "String";
+		case BOOL:
+			return "Boolean";
+		case TYPE_SPECIFIER:
+			return "Type spcecifier";
 		case EQ:
 			return "==";
 		case NE:
@@ -356,9 +361,13 @@ static void traverse(Node *root)
 			}
 			break;
 		case AST_IDX_ARRAY:
-			printf("(INDEXED ARRAY: %s | INDEX: [", root->ia_label);
-			traverse(root->index_value);
-			printf("]) ");
+			printf("(INDEXED %d-D ARRAY: %s | INDEX: ", root->ndim_index, root->ia_label);
+			for (int i = 0; i < root->ndim_index; i++) {
+				printf("[");
+				traverse(root->index_values[i]);
+				printf("]");
+			}
+			printf(")");
 			break;
 		case AST_FIELD_ACCESS:
 			printf("(FIELD ACCESS | RECORD: ");
@@ -697,9 +706,9 @@ static Node *ast_arraytype(size_t sz, Node **arr)
 	return makeNode(&(Node){AST_ARRAY, .array_size=sz, .array_elems=arr});
 }
 
-static Node *ast_indexed_array(char *label, Node *idx)
+static Node *ast_indexed_array(char *label, Node **idxs, size_t idxs_sz)
 {
-	return makeNode(&(Node){AST_IDX_ARRAY, .ia_label=label, .index_value=idx});
+	return makeNode(&(Node){AST_IDX_ARRAY, .ia_label=label, .index_values=idxs, .ndim_index=idxs_sz});
 }
 
 static Node *ast_field_access(Node *rlabel, Node *field)
@@ -888,13 +897,10 @@ static Node *read_fn_def()
 
 		expect(ARROW_OP, "");
 
-		tok = get();
-		int ret_type;
+		expect(TYPE_SPECIFIER, "-> operator must be followed by valid type specifier.");
+
+		int ret_type = get_type_specifier(curr());
 		int array_dims = 0;
-		if (!(ret_type = is_type_specifier(tok))) {
-			c_error("-> operator must be followed by valid type specifier.\n", tok->line);
-			return NULL;
-		}
 
 		for (;;) {
 			tok = get();
@@ -1003,6 +1009,7 @@ static Node *read_primary_expr()
 		case FLOAT: return read_float(tok);
 		case IDENTIFIER: return read_ident(tok, 0);
 		case STRING: return read_string(tok);
+		case BOOL: return read_bool(tok);
 		default: 
 			     unget();
 			     return NULL;
@@ -1316,7 +1323,8 @@ static Node *read_declaration_expr(int no_assignment)
 	char *rlabel = NULL;
 	int array_dims = 0;
 	int *array_size = NULL;
-	if ((type = is_type_specifier(tok))) {
+	if (tok->class == TYPE_SPECIFIER) {
+		type = get_type_specifier(tok);
 		if (type == TYPE_RECORD) {
 			tok = get();
 			if (tok->class == IDENTIFIER) {
@@ -1363,6 +1371,8 @@ static Node *read_declaration_expr(int no_assignment)
 				unget();
 				return lhs;
 			}
+		} else {
+			c_error("Invalid declaration expression.", tok->line);
 		}
 	}
 
@@ -1426,25 +1436,30 @@ static Node *read_indexed_array()
 	strcpy(label, tok->repr);
 	label[strlen(tok->repr)] = '\0';
 
-	expect('[', "");
-	Node *index = read_expr();
+	Node *index;
+	Node **index_array = NULL;
+	int index_array_sz = 0;
+	for (;;) {
+		if (!next_token('[')) {
+			break;
+		}
 
-	if (index == NULL) {
-		c_error("Invalid array index.", tok->line);
+		index = read_expr();
+
+		if (index == NULL || index->type == AST_STRING || index->type == AST_ARRAY
+		   || index->type == AST_FLOAT) 
+		{
+			c_error("Invalid array index.", tok->line);
+		}
+
+		expect(']', "");
+
+		index_array = realloc(index_array, sizeof(Node *) * (index_array_sz+1));
+		index_array[index_array_sz] = index;
+		index_array_sz++;
 	}
 
-	/*
-	if (tok->class == INT) {
-		index = read_int(tok);
-	} else if (tok->class == IDENTIFIER) {
-		index = read_ident(tok, 0);
-	} else {
-		c_error("Invalid array index.", tok->line);
-	} */
-
-	expect(']', "");
-
-	return ast_indexed_array(label, index);
+	return ast_indexed_array(label, index_array, index_array_sz);
 }
 
 static Node *read_enumerable_expr()
@@ -1514,6 +1529,15 @@ static Node *read_string(Token_type *tok)
 	return ast_stringtype(s);
 }
 
+static Node *read_bool(Token_type *tok)
+{
+	if (!strcmp(tok->repr, "true")) {
+		return ast_booltype(1);
+	} else {
+		return ast_booltype(0);
+	}
+}
+
 static Node *read_ident(Token_type *tok, int no_brackets)
 {
 	char *s;
@@ -1521,17 +1545,12 @@ static Node *read_ident(Token_type *tok, int no_brackets)
 		if (curr()->class == '(') {
 			unget();
 			return read_fn_call();
-		} else if (curr()->class == '[') {
-			unget();
-			return read_indexed_array();
-		}
+		} 
 	}
 
-	if (!strcmp(tok->repr, "true")) {
-		return ast_booltype(1);
-	}
-	if (!strcmp(tok->repr, "false")) {
-		return ast_booltype(0);
+	if (curr()->class == '[') {
+		unget();
+		return read_indexed_array();
 	}
 
 	s = malloc(strlen(tok->repr) + 1);

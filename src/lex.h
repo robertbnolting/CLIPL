@@ -5,6 +5,8 @@ enum {
 	INT,
 	FLOAT,
 	STRING,
+	BOOL,
+	TYPE_SPECIFIER,
 	EQ,
 	NE,
 	GE,

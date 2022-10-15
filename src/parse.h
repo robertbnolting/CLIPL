@@ -1,4 +1,11 @@
 enum {
+	KEYWORD_IF = 1,
+	KEYWORD_WHILE,
+	KEYWORD_FOR,
+	KEYWORD_RETURN,
+};
+
+enum {
 	TYPE_VOID = 1,
 	TYPE_INT,
 	TYPE_FLOAT,
@@ -6,13 +13,6 @@ enum {
 	TYPE_BOOL,
 	TYPE_ARRAY,
 	TYPE_RECORD,
-};
-
-enum {
-	KEYWORD_IF = 1,
-	KEYWORD_WHILE,
-	KEYWORD_FOR,
-	KEYWORD_RETURN,
 };
 
 enum {
@@ -74,7 +74,8 @@ typedef struct Node {
 		// indexed array
 		struct {
 			char *ia_label;
-			struct Node *index_value;
+			struct Node **index_values;
+			int ndim_index;
 		};
 		// field access
 		struct {
