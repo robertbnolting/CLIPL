@@ -121,10 +121,15 @@ static Node *printCFG(Node *start)
 	while (last != NULL) {
 		printNode(last);
 		if (last->type == AST_IF_STMT) {
-			printf("\tTHEN: ");
-			printCFG(last->successor);
-			printf("\tELSE: ");
-			last = printCFG(last->false_successor)->successor;
+			if (last->false_successor) {
+				printf("\tTHEN: ");
+				printCFG(last->successor);
+				printf("\tELSE: ");
+				last = printCFG(last->false_successor)->successor;
+			} else {
+				printf("\tTHEN: ");
+				last = printCFG(last->successor)->successor;
+			}
 		} else if (last->type == AST_WHILE_STMT) {
 			printCFG(last->while_true_successor);
 			printf(")\n");
@@ -345,6 +350,11 @@ static void printNode(Node *n)
 			break;
 		case AST_FOR_STMT:
 			printf("(FOR BODY:\n");
+			break;
+		case CFG_AUXILIARY_NODE:
+			break;
+		case CFG_JOIN_NODE:
+			printf("(ENDIF)\n");
 			break;
 	}
 }
@@ -1697,11 +1707,15 @@ static void thread_expression(Node *expr)
 			expr->successor = aux->successor;
 			last_node->successor = end_if;
 
-			last_node = aux;
-			thread_block(expr->else_body, expr->n_else_stmts);
+			if (expr->n_else_stmts > 0) {
+				last_node = aux;
+				thread_block(expr->else_body, expr->n_else_stmts);
 
-			expr->false_successor = aux->successor;
-			last_node->successor = end_if;
+				expr->false_successor = aux->successor;
+				last_node->successor = end_if;
+			} else {
+				expr->false_successor = NULL;
+			}
 
 			last_node = end_if;
 
@@ -1722,7 +1736,13 @@ static void thread_expression(Node *expr)
 		case AST_RETURN_STMT:
 			last_node->successor = expr;
 			last_node = expr;
-			thread_expression(expr->retval);
+			if (expr->retval == NULL) {
+				aux = cfg_aux_node();
+				last_node->successor = aux;
+				last_node = aux;
+			} else {
+				thread_expression(expr->retval);
+			}
 			break;
 		case AST_WHILE_STMT:
 			thread_expression(expr->while_cond);
@@ -1757,28 +1777,3 @@ static void thread_expression(Node *expr)
 			break;
 	}
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

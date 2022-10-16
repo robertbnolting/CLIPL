@@ -47,9 +47,8 @@ enum {
 	AST_WHILE_STMT,
 	AST_FOR_STMT,
 	AST_RETURN_STMT,
-	CFG_AUXILIARY_NODE,
-	// only necessary for printing cfg
-	CFG_JOIN_NODE,
+	CFG_AUXILIARY_NODE, 	// also serve as empty nodes
+	CFG_JOIN_NODE, 		// only necessary for printing cfg
 };
 
 typedef struct Node {
