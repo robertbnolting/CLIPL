@@ -8,8 +8,8 @@
 #include "lex.h"
 #include "error.h"
 
-#define AST_OUTPUT 1
-#define CFG_OUTPUT 0
+#define AST_OUTPUT 0
+#define CFG_OUTPUT 1
 
 static int pos;
 
@@ -270,6 +270,9 @@ static void printNode(Node *n)
 			break;
 		case AST_DECLARATION:
 			printf("(%d-DECLARATION: %s) ", n->vtype, n->vlabel);
+			break;
+		case AST_IDX_ARRAY:
+			printf("(%s[] %d times) ", n->ia_label, n->ndim_index);
 			break;
 		case AST_RETURN_STMT:
 			printf("(RETURN)");
@@ -1624,9 +1627,15 @@ static void thread_expression(Node *expr)
 		case AST_STRING:
 		case AST_BOOL:
 		case AST_ARRAY:
-		case AST_IDX_ARRAY:
 		case AST_FIELD_ACCESS:
 		case AST_DECLARATION:
+			last_node->successor = expr;
+			last_node = expr;
+			break;
+		case AST_IDX_ARRAY:
+			for (int i = expr->ndim_index-1; i >= 0; i--) {
+				thread_expression(expr->index_values[i]);
+			}
 			last_node->successor = expr;
 			last_node = expr;
 			break;
