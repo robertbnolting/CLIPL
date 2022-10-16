@@ -125,6 +125,10 @@ static Node *printCFG(Node *start)
 			printCFG(last->successor);
 			printf("\tELSE: ");
 			last = printCFG(last->false_successor)->successor;
+		} else if (last->type == AST_WHILE_STMT) {
+			printCFG(last->while_true_successor);
+			printf(")\n");
+			last = last->successor;
 		} else if (last->type == CFG_JOIN_NODE) {
 			return last;
 		} else {
@@ -328,6 +332,9 @@ static void printNode(Node *n)
 			break;
 		case AST_IF_STMT:
 			printf("(IF)\n");
+			break;
+		case AST_WHILE_STMT:
+			printf("(WHILE TRUE:\n");
 			break;
 	}
 }
@@ -1616,6 +1623,8 @@ static void thread_block(Node **block, size_t block_size)
 
 static void thread_expression(Node *expr)
 {
+	Node *aux;
+
 	switch (expr->type)
 	{
 		case AST_FUNCTION_DEF:
@@ -1664,7 +1673,7 @@ static void thread_expression(Node *expr)
 			last_node->successor = expr;
 
 			Node *end_if = cfg_join_node();
-			Node *aux = cfg_aux_node();
+			aux = cfg_aux_node();
 
 			last_node = aux;
 			thread_block(expr->if_body, expr->n_if_stmts);
@@ -1679,6 +1688,8 @@ static void thread_expression(Node *expr)
 			last_node->successor = end_if;
 
 			last_node = end_if;
+
+			free(aux);
 
 			break;
 		case AST_FUNCTION_CALL:
@@ -1697,5 +1708,46 @@ static void thread_expression(Node *expr)
 			last_node = expr;
 			thread_expression(expr->retval);
 			break;
+		case AST_WHILE_STMT:
+			thread_expression(expr->while_cond);
+			last_node->successor = expr;
+
+			aux = cfg_aux_node();
+			last_node = aux;
+
+			thread_block(expr->while_body, expr->n_while_stmts);
+
+			expr->while_true_successor = aux->successor;
+
+			last_node = expr;
+
+			free(aux);
+
+			break;
 	}
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

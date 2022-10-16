@@ -132,6 +132,8 @@ typedef struct Node {
 			struct Node *while_cond;
 			size_t n_while_stmts;
 			struct Node **while_body;
+			// cfg
+			struct Node *while_true_successor;
 		};
 		// for statement
 		struct {
