@@ -129,6 +129,10 @@ static Node *printCFG(Node *start)
 			printCFG(last->while_true_successor);
 			printf(")\n");
 			last = last->successor;
+		} else if (last->type == AST_FOR_STMT) {
+			printCFG(last->for_loop_successor);
+			printf(")\n");
+			last = last->successor;
 		} else if (last->type == CFG_JOIN_NODE) {
 			return last;
 		} else {
@@ -335,6 +339,9 @@ static void printNode(Node *n)
 			break;
 		case AST_WHILE_STMT:
 			printf("(WHILE TRUE:\n");
+			break;
+		case AST_FOR_STMT:
+			printf("(FOR BODY:\n");
 			break;
 	}
 }
@@ -1718,6 +1725,21 @@ static void thread_expression(Node *expr)
 			thread_block(expr->while_body, expr->n_while_stmts);
 
 			expr->while_true_successor = aux->successor;
+
+			last_node = expr;
+
+			free(aux);
+
+			break;
+		case AST_FOR_STMT:
+			last_node->successor = expr;
+
+			aux = cfg_aux_node();
+			last_node = aux;
+			
+			thread_block(expr->for_body, expr->n_for_stmts);
+
+			expr->for_loop_successor = aux->successor;
 
 			last_node = expr;
 

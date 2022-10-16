@@ -141,6 +141,8 @@ typedef struct Node {
 			struct Node *for_enum;
 			size_t n_for_stmts;
 			struct Node **for_body;
+			// cfg
+			struct Node *for_loop_successor;
 		};
 		// return statement
 		struct Node *retval;
