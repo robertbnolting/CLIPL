@@ -273,6 +273,9 @@ static void printNode(Node *n)
 		case AST_BOOL:
 			n->bval ? printf("(BOOLEAN: true) ") : printf("(BOOLEAN: false) ");
 			break;
+		case AST_ARRAY:
+			printf("(%ld-member ARRAY) ", n->array_size);
+			break;
 		case AST_FIELD_ACCESS:
 			printf("(FIELD ACCESS: %s.%s) ", n->access_rlabel->name, n->access_field->name);
 			break;
@@ -280,7 +283,7 @@ static void printNode(Node *n)
 			printf("(%d-DECLARATION: %s) ", n->vtype, n->vlabel);
 			break;
 		case AST_IDX_ARRAY:
-			printf("(%s[] %d times) ", n->ia_label, n->ndim_index);
+			printf("(%s[] index %d times) ", n->ia_label, n->ndim_index);
 			break;
 		case AST_RETURN_STMT:
 			printf("(RETURN)");
@@ -1498,7 +1501,7 @@ static Node *read_array_expr()
 	size_t array_sz = 0;
 	Token_type *tok;
 	for (;;) {
-		Node *e = read_primary_expr();
+		Node *e = read_expr();
 		if (e == NULL) {
 			break;
 		}
@@ -1642,9 +1645,15 @@ static void thread_expression(Node *expr)
 		case AST_FLOAT:
 		case AST_STRING:
 		case AST_BOOL:
-		case AST_ARRAY:
 		case AST_FIELD_ACCESS:
 		case AST_DECLARATION:
+			last_node->successor = expr;
+			last_node = expr;
+			break;
+		case AST_ARRAY:
+			for (int i = expr->array_size-1; i >= 0; i--) {
+				thread_expression(expr->array_elems[i]);
+			}
 			last_node->successor = expr;
 			last_node = expr;
 			break;
