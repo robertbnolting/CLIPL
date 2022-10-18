@@ -60,6 +60,7 @@ static void traverse();
 static char *get_array_sizes();
 static char *list_nodearray();
 static void list_stmts();
+static const char *tokenclassToString();
 
 // CFG generation
 static Node *cfg_aux_node();
@@ -71,7 +72,11 @@ static Node *thread_ast();
 static Node *printCFG();
 static void printNode();
 
-static const char *tokenclassToString();
+// Symbolic interpretation
+static void sym_interpret();
+static void interpret_expr();
+static void interpret_assignment_expr();
+static void interpret_declaration_expr();
 
 // Parser start
 static Node **global_functions;
@@ -113,6 +118,8 @@ void parser_init()
 	}
 	free(node_array);
 #endif
+
+	sym_interpret(cfg_array);
 }
 
 static Node *printCFG(Node *start)
@@ -1777,3 +1784,175 @@ static void thread_expression(Node *expr)
 			break;
 	}
 }
+
+static void push(void ***top, void *n) // doesn't work
+{
+	*top += sizeof(void *);
+	**top = n;
+}
+
+static void *pop(void ***top)
+{
+	void *n = **top;
+	*top -= sizeof(void *);
+
+	return n;
+}
+
+typedef struct {
+	char *var_name;
+	int status;	// 0 -> Uninitialized, 1 -> Initialized
+	int type;
+	union {
+		int ival;
+		char *sval;
+		float fval;
+		int bval;
+	};
+} ValPropPair;
+
+static ValPropPair *makeValPropPair(ValPropPair *tmp)
+{
+	ValPropPair *r = malloc(sizeof(ValPropPair));
+
+	*r = *tmp;
+
+	return r;
+}
+
+static ValPropPair *searchValueStack(ValPropPair **stack, char *key)
+{
+	ValPropPair *current = *stack;
+	while (current != NULL) {
+		if (!strcmp(current->var_name, key)) { 
+			return current; 
+		} else {
+			current += sizeof(ValPropPair *);
+		}
+	}
+
+	return NULL;
+}
+
+static void sym_interpret(Node *cfg)
+{
+	Node **opstack = calloc(512, sizeof(Node *));
+	Node **optop = opstack - sizeof(Node *);
+
+	ValPropPair **valstack = calloc(512, sizeof(ValPropPair *));
+	ValPropPair *valtop = valstack - sizeof(ValPropPair *);
+
+	Node *last = cfg;
+
+	while (last != NULL) {
+		interpret_expr(last, &optop, &valtop);
+		last = last->successor;
+	}
+}
+
+static void interpret_assignment_expr(Node *expr, Node ***opstack, ValPropPair ***valstack)
+{
+	Node *rhs = pop(opstack);
+	Node *lhs = pop(opstack);
+
+	if (lhs->type == AST_DECLARATION || lhs->type == AST_IDENT) {
+		ValPropPair *pair;
+		if (lhs->type == AST_DECLARATION) {
+			pair = searchValueStack(*valstack, lhs->vlabel);
+			if (pair == NULL) {
+				char msg[128];
+				sprintf(msg, "No variable with name %s found.", lhs->vlabel);
+				c_error(msg, -1);
+			}
+		} else {
+			pair = searchValueStack(*valstack, lhs->name);
+			if (pair == NULL) {
+				char msg[128];
+				sprintf(msg, "No variable with name %s found.", lhs->name);
+				c_error(msg, -1);
+			}
+		}
+
+		switch (rhs->type)
+		{
+			case AST_INT:
+				pair->ival = rhs->ival;
+				break;
+			case AST_STRING:
+				pair->sval = rhs->sval;
+				break;
+			case AST_FLOAT:
+				pair->fval = rhs->fval;
+				break;
+			case AST_BOOL:
+				pair->bval = rhs->bval;
+				break;
+			default:
+				c_error("Right-hand side of '=' invalid.", -1);
+		}
+	} else {
+		c_error("Left-hand side of '=' invalid.", -1);
+	}
+}
+
+static void interpret_declaration_expr(Node *expr, Node ***opstack, ValPropPair ***valstack)
+{
+	ValPropPair *pair = makeValPropPair(&(ValPropPair){expr->vlabel, 0, expr->vtype});
+
+	push(valstack, pair);
+	push(opstack, expr);
+}
+
+static void interpret_expr(Node *expr, Node ***opstack, ValPropPair ***valstack)
+{
+	switch (expr->type)
+	{
+		case AST_INT:
+			push(opstack, expr);
+			break;
+		case AST_STRING:
+			push(opstack, expr);
+			break;
+		case AST_FLOAT:
+			push(opstack, expr);
+			break;
+		case AST_BOOL:
+			push(opstack, expr);
+			break;
+		case AST_IDENT:
+			push(opstack, expr);
+			break;
+		case AST_DECLARATION:
+			interpret_declaration_expr(expr, opstack, valstack);
+			break;
+		case AST_ASSIGN:
+			interpret_assignment_expr(expr, opstack, valstack);
+			break;
+	}
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
