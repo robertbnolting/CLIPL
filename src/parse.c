@@ -60,7 +60,10 @@ static void traverse();
 static char *get_array_sizes();
 static char *list_nodearray();
 static void list_stmts();
+
+// Error messaging
 static const char *tokenclassToString();
+static const char *datatypeToString();
 
 // CFG generation
 static Node *cfg_aux_node();
@@ -245,6 +248,21 @@ static const char *tokenclassToString(int tclass)
 			return "->";
 		default:
 			return "Unknown token";
+	}
+}
+
+static const char *datatypeToString(int type)
+{
+	switch (type)
+	{
+		case TYPE_INT:
+			return "int";
+		case TYPE_STRING:
+			return "string";
+		case TYPE_FLOAT:
+			return "float";
+		case TYPE_BOOL:
+			return "bool";
 	}
 }
 
@@ -1732,9 +1750,10 @@ static void thread_expression(Node *expr)
 		case AST_FUNCTION_CALL:
 			Node *func = find_function(expr->call_label);
 			if (func == NULL) {
-				char msg[128];
+				char *msg = malloc(128);
 				sprintf(msg, "No function with name '%s' was found.", expr->call_label);
 				c_error(msg, -1);
+				free(msg);
 			}
 			last_node->successor = expr;
 			last_node = expr;
@@ -1860,31 +1879,57 @@ static void interpret_assignment_expr(Node *expr, Node ***opstack, ValPropPair *
 		if (lhs->type == AST_DECLARATION) {
 			pair = searchValueStack(*valstack, lhs->vlabel);
 			if (pair == NULL) {
-				char msg[128];
+				char *msg = malloc(128);
 				sprintf(msg, "No variable with name %s found.", lhs->vlabel);
 				c_error(msg, -1);
+				free(msg);
 			}
 		} else {
 			pair = searchValueStack(*valstack, lhs->name);
 			if (pair == NULL) {
-				char msg[128];
+				char *msg = malloc(128);
 				sprintf(msg, "No variable with name %s found.", lhs->name);
 				c_error(msg, -1);
+				free(msg);
 			}
 		}
 
 		switch (rhs->type)
 		{
 			case AST_INT:
+				if (pair->type != TYPE_INT) {
+					char *msg = malloc(128);
+					sprintf(msg, "Assignment of type 'int' to variable %s of type '%s'.", pair->var_name, datatypeToString(pair->type));
+					c_error(msg, -1);
+					free(msg);
+				}
 				pair->ival = rhs->ival;
 				break;
 			case AST_STRING:
+				if (pair->type != TYPE_STRING) {
+					char *msg = malloc(128);
+					sprintf(msg, "Assignment of type 'string' to variable %s of type '%s'.", pair->var_name, datatypeToString(pair->type));
+					c_error(msg, -1);
+					free(msg);
+				}
 				pair->sval = rhs->sval;
 				break;
 			case AST_FLOAT:
+				if (pair->type != TYPE_FLOAT) {
+					char *msg = malloc(128);
+					sprintf(msg, "Assignment of type 'float' to variable %s of type '%s'.", pair->var_name, datatypeToString(pair->type));
+					c_error(msg, -1);
+					free(msg);
+				}
 				pair->fval = rhs->fval;
 				break;
 			case AST_BOOL:
+				if (pair->type != TYPE_BOOL) {
+					char *msg = malloc(128);
+					sprintf(msg, "Assignment of type 'bool' to variable %s of type '%s'.", pair->var_name, datatypeToString(pair->type));
+					c_error(msg, -1);
+					free(msg);
+				}
 				pair->bval = rhs->bval;
 				break;
 			default:
@@ -1930,29 +1975,3 @@ static void interpret_expr(Node *expr, Node ***opstack, ValPropPair ***valstack)
 			break;
 	}
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
