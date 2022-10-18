@@ -9,7 +9,8 @@
 #include "error.h"
 
 #define AST_OUTPUT 0
-#define CFG_OUTPUT 1
+#define CFG_OUTPUT 0
+#define SYM_OUTPUT 1
 
 static int pos;
 
@@ -1804,16 +1805,16 @@ static void thread_expression(Node *expr)
 	}
 }
 
-static void push(void ***top, void *n) // doesn't work
+static void push(void ***top, void *n)
 {
-	*top += sizeof(void *);
+	(*top)++;
 	**top = n;
 }
 
 static void *pop(void ***top)
 {
 	void *n = **top;
-	*top -= sizeof(void *);
+	(*top)--;
 
 	return n;
 }
@@ -1839,14 +1840,14 @@ static ValPropPair *makeValPropPair(ValPropPair *tmp)
 	return r;
 }
 
-static ValPropPair *searchValueStack(ValPropPair **stack, char *key)
+static ValPropPair *searchValueStack(ValPropPair ***stack, char *key)
 {
-	ValPropPair *current = *stack;
-	while (current != NULL) {
-		if (!strcmp(current->var_name, key)) { 
-			return current; 
+	ValPropPair **current = *stack;
+	while (*current != NULL) {
+		if (!strcmp((*current)->var_name, key)) { 
+			return *current; 
 		} else {
-			current += sizeof(ValPropPair *);
+			current--;
 		}
 	}
 
@@ -1856,16 +1857,49 @@ static ValPropPair *searchValueStack(ValPropPair **stack, char *key)
 static void sym_interpret(Node *cfg)
 {
 	Node **opstack = calloc(512, sizeof(Node *));
-	Node **optop = opstack - sizeof(Node *);
+	Node **optop = opstack - 1;
 
 	ValPropPair **valstack = calloc(512, sizeof(ValPropPair *));
-	ValPropPair *valtop = valstack - sizeof(ValPropPair *);
+	ValPropPair **valtop = valstack - 1;
 
 	Node *last = cfg;
 
 	while (last != NULL) {
 		interpret_expr(last, &optop, &valtop);
 		last = last->successor;
+	}
+
+#if SYM_OUTPUT
+	while (*valtop != NULL) {
+		printf("NAME: %s | STATUS: %s | TYPE: %s | VALUE: ", (*valtop)->var_name,
+			(*valtop)->status ? "Initialized" : "Uninitialized", datatypeToString((*valtop)->type));
+		switch ((*valtop)->type)
+		{
+			case TYPE_INT:
+				printf("%d\n", (*valtop)->ival);
+				break;
+			case TYPE_STRING:
+				printf("%s\n", (*valtop)->sval);
+				break;
+			case TYPE_FLOAT:
+				printf("%f\n", (*valtop)->fval);
+				break;
+			case TYPE_BOOL:
+				printf("%s\n", (*valtop)->bval ? "true" : "false");
+				break;
+		}
+
+		valtop--;
+	}
+#endif
+}
+
+static void checkDataType(ValPropPair *pair, int type)
+{
+	if (pair->type != type) {
+		char *msg = malloc(128);
+		sprintf(msg, "Assignment of type '%s' to variable %s of type '%s'.", datatypeToString(type), pair->var_name, datatypeToString(pair->type));
+		c_error(msg, -1);
 	}
 }
 
@@ -1877,7 +1911,7 @@ static void interpret_assignment_expr(Node *expr, Node ***opstack, ValPropPair *
 	if (lhs->type == AST_DECLARATION || lhs->type == AST_IDENT) {
 		ValPropPair *pair;
 		if (lhs->type == AST_DECLARATION) {
-			pair = searchValueStack(*valstack, lhs->vlabel);
+			pair = searchValueStack(valstack, lhs->vlabel);
 			if (pair == NULL) {
 				char *msg = malloc(128);
 				sprintf(msg, "No variable with name %s found.", lhs->vlabel);
@@ -1885,56 +1919,64 @@ static void interpret_assignment_expr(Node *expr, Node ***opstack, ValPropPair *
 				free(msg);
 			}
 		} else {
-			pair = searchValueStack(*valstack, lhs->name);
+			pair = searchValueStack(valstack, lhs->name);
 			if (pair == NULL) {
 				char *msg = malloc(128);
 				sprintf(msg, "No variable with name %s found.", lhs->name);
 				c_error(msg, -1);
-				free(msg);
 			}
 		}
 
 		switch (rhs->type)
 		{
 			case AST_INT:
-				if (pair->type != TYPE_INT) {
-					char *msg = malloc(128);
-					sprintf(msg, "Assignment of type 'int' to variable %s of type '%s'.", pair->var_name, datatypeToString(pair->type));
-					c_error(msg, -1);
-					free(msg);
-				}
+				checkDataType(pair, TYPE_INT);
 				pair->ival = rhs->ival;
 				break;
 			case AST_STRING:
-				if (pair->type != TYPE_STRING) {
-					char *msg = malloc(128);
-					sprintf(msg, "Assignment of type 'string' to variable %s of type '%s'.", pair->var_name, datatypeToString(pair->type));
-					c_error(msg, -1);
-					free(msg);
-				}
+				checkDataType(pair, TYPE_STRING);
 				pair->sval = rhs->sval;
 				break;
 			case AST_FLOAT:
-				if (pair->type != TYPE_FLOAT) {
-					char *msg = malloc(128);
-					sprintf(msg, "Assignment of type 'float' to variable %s of type '%s'.", pair->var_name, datatypeToString(pair->type));
-					c_error(msg, -1);
-					free(msg);
-				}
+				checkDataType(pair, TYPE_FLOAT);
 				pair->fval = rhs->fval;
 				break;
 			case AST_BOOL:
-				if (pair->type != TYPE_BOOL) {
-					char *msg = malloc(128);
-					sprintf(msg, "Assignment of type 'bool' to variable %s of type '%s'.", pair->var_name, datatypeToString(pair->type));
-					c_error(msg, -1);
-					free(msg);
-				}
+				checkDataType(pair, TYPE_BOOL);
 				pair->bval = rhs->bval;
 				break;
+			case AST_IDENT:
+				ValPropPair *ident_pair = searchValueStack(valstack, rhs->name);
+				if (ident_pair != NULL) {
+					switch (ident_pair->type)
+					{
+						case TYPE_INT:
+							checkDataType(pair, TYPE_INT);
+							pair->ival = ident_pair->ival;
+							break;
+						case TYPE_STRING:
+							checkDataType(pair, TYPE_STRING);
+							pair->sval = ident_pair->sval;
+							break;
+						case TYPE_FLOAT:
+							checkDataType(pair, TYPE_FLOAT);
+							pair->fval = ident_pair->fval;
+							break;
+						case TYPE_BOOL:
+							checkDataType(pair, TYPE_BOOL);
+							pair->bval = ident_pair->bval;
+							break;
+					}
+					break;
+				} else {
+					char *msg = malloc(128);
+					sprintf(msg, "No variable with name %s found.", rhs->name);
+					c_error(msg, -1);
+				}
 			default:
 				c_error("Right-hand side of '=' invalid.", -1);
 		}
+		pair->status = 1;
 	} else {
 		c_error("Left-hand side of '=' invalid.", -1);
 	}
