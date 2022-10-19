@@ -1998,67 +1998,160 @@ static void interpret_binary_expr(int op, Node ***opstack, ValPropPair ***valsta
 				c_error("Operands of binary operation must be of the same type.", -1);
 	}
 
+
 	switch (l_operand->type)
 	{
 		case AST_INT:
+		{
+			int l = l_operand->ival;
+			int r;
 			if (r_operand->type != AST_INT) {
 				ValPropPair *ident_pair = searchValueStack(valstack, r_operand->name);
-			} else {
-				switch (op)
-				{
-					case AST_ADD:
-						push(opstack, ast_inttype(l_operand->ival + r_operand->ival));
-						break;
-					case AST_SUB:
-						push(opstack, ast_inttype(l_operand->ival - r_operand->ival));
-						break;
-					case AST_MUL:
-						push(opstack, ast_inttype(l_operand->ival * r_operand->ival));
-						break;
-					case AST_DIV:
-						push(opstack, ast_inttype(l_operand->ival / r_operand->ival));
-						break;
-					case AST_GT:
-						push(opstack, ast_booltype(l_operand->ival > r_operand->ival));
-						break;
-					case AST_LT:
-						push(opstack, ast_booltype(l_operand->ival < r_operand->ival));
-						break;
-					case AST_EQ:
-						push(opstack, ast_booltype(l_operand->ival == r_operand->ival));
-						break;
-					case AST_NE:
-						push(opstack, ast_booltype(l_operand->ival != r_operand->ival));
-						break;
-					case AST_GE:
-						push(opstack, ast_booltype(l_operand->ival >= r_operand->ival));
-						break;
-					case AST_LE:
-						push(opstack, ast_booltype(l_operand->ival <= r_operand->ival));
-						break;
+				if (ident_pair->type != TYPE_INT) {
+					c_error("Operands of binary operation must be of the same type.", -1);
 				}
+				r = ident_pair->ival;
+			} else {
+				r = r_operand->ival;
 			}
-			break;
+			switch (op)
+			{
+				case AST_ADD:
+					push(opstack, ast_inttype(l + r));
+					break;
+				case AST_SUB:
+					push(opstack, ast_inttype(l - r));
+					break;
+				case AST_MUL:
+					push(opstack, ast_inttype(l * r));
+					break;
+				case AST_DIV:
+					push(opstack, ast_inttype(l / r));
+					break;
+				case AST_GT:
+					push(opstack, ast_booltype(l > r));
+					break;
+				case AST_LT:
+					push(opstack, ast_booltype(l < r));
+					break;
+				case AST_EQ:
+					push(opstack, ast_booltype(l == r));
+					break;
+				case AST_NE:
+					push(opstack, ast_booltype(l != r));
+					break;
+				case AST_GE:
+					push(opstack, ast_booltype(l >= r));
+					break;
+				case AST_LE:
+					push(opstack, ast_booltype(l <= r));
+					break;
+			}
+		}
+		break;
 		case AST_STRING:
+		{
+			char *l = l_operand->sval;
+			char *r;
 			if (r_operand->type != AST_STRING) {
-				;
-			} else {
-				switch (op)
-				{
-					case AST_ADD:
-						char *comp_string = malloc(strlen(l_operand->sval) + strlen(r_operand->sval) + 1);
-						strcpy(comp_string, l_operand->sval);
-						push(opstack, ast_stringtype(strcat(comp_string, r_operand->sval)));
-						break;
-					case AST_EQ:
-						push(opstack, ast_booltype(!strcmp(l_operand->sval, r_operand->sval)));
-						break;
-					default:
-						c_error("Illegal operation on value with type 'string'.", -1);
-						break;
+				ValPropPair *ident_pair = searchValueStack(valstack, r_operand->name);
+				if (ident_pair->type != TYPE_STRING) {
+					c_error("Operands of binary operation must be of the same type.", -1);
 				}
+				r = ident_pair->sval;
+			} else {
+				r = r_operand->sval;
 			}
-			break;
+			switch (op)
+			{
+				case AST_ADD:
+					char *comp_string = malloc(strlen(l) + strlen(r) + 1);
+					strcpy(comp_string, l);
+					push(opstack, ast_stringtype(strcat(comp_string, r)));
+					break;
+				case AST_EQ:
+					push(opstack, ast_booltype(!strcmp(l, r)));
+					break;
+				default:
+					c_error("Illegal operation on value with type 'string'.", -1);
+					break;
+			}
+		}
+		break;
+		case AST_IDENT:
+		{
+			ValPropPair *l_op_pair = searchValueStack(valstack, l_operand->name);
+			ValPropPair *r_op_pair = searchValueStack(valstack, r_operand->name);
+			switch (l_op_pair->type)
+			{
+				case TYPE_INT:
+				{
+					if (r_op_pair->type != TYPE_INT) {
+						c_error("Operands of binary operation must be of the same type.", -1);
+					}
+					int l = l_op_pair->ival;
+					int r = r_op_pair->ival;
+					switch (op)
+					{
+						case AST_ADD:
+							push(opstack, ast_inttype(l + r));
+							break;
+						case AST_SUB:
+							push(opstack, ast_inttype(l - r));
+							break;
+						case AST_MUL:
+							push(opstack, ast_inttype(l * r));
+							break;
+						case AST_DIV:
+							push(opstack, ast_inttype(l / r));
+							break;
+						case AST_GT:
+							push(opstack, ast_booltype(l > r));
+							break;
+						case AST_LT:
+							push(opstack, ast_booltype(l < r));
+							break;
+						case AST_EQ:
+							push(opstack, ast_booltype(l == r));
+							break;
+						case AST_NE:
+							push(opstack, ast_booltype(l != r));
+							break;
+						case AST_GE:
+							push(opstack, ast_booltype(l >= r));
+							break;
+						case AST_LE:
+							push(opstack, ast_booltype(l <= r));
+							break;
+					}
+				}
+				break;
+				case TYPE_STRING:
+				{
+					if (r_op_pair->type != TYPE_STRING) {
+						c_error("Operands of binary operation must be of the same type.", -1);
+					}
+					char *l = l_op_pair->sval;
+					char *r = r_op_pair->sval;
+					switch (op)
+					{
+						case AST_ADD:
+							char *comp_string = malloc(strlen(l) + strlen(r) + 1);
+							strcpy(comp_string, l);
+							push(opstack, ast_stringtype(strcat(comp_string, r)));
+							break;
+						case AST_EQ:
+							push(opstack, ast_booltype(!strcmp(l, r)));
+							break;
+						default:
+							c_error("Illegal operation on value with type 'string'.", -1);
+							break;
+					}
+				}
+				break;
+			}
+		}
+		break;
 	}
 }
 
