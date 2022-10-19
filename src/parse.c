@@ -1858,9 +1858,11 @@ static void sym_interpret(Node *cfg)
 {
 	Node **opstack = calloc(512, sizeof(Node *));
 	Node **optop = opstack - 1;
+	*optop = 0;
 
 	ValPropPair **valstack = calloc(512, sizeof(ValPropPair *));
 	ValPropPair **valtop = valstack - 1;
+	*valtop = 0;
 
 	Node *last = cfg;
 
@@ -1873,20 +1875,24 @@ static void sym_interpret(Node *cfg)
 	while (*valtop != NULL) {
 		printf("NAME: %s | STATUS: %s | TYPE: %s | VALUE: ", (*valtop)->var_name,
 			(*valtop)->status ? "Initialized" : "Uninitialized", datatypeToString((*valtop)->type));
-		switch ((*valtop)->type)
-		{
-			case TYPE_INT:
-				printf("%d\n", (*valtop)->ival);
-				break;
-			case TYPE_STRING:
-				printf("%s\n", (*valtop)->sval);
-				break;
-			case TYPE_FLOAT:
-				printf("%f\n", (*valtop)->fval);
-				break;
-			case TYPE_BOOL:
-				printf("%s\n", (*valtop)->bval ? "true" : "false");
-				break;
+		if ((*valtop)->status) {
+			switch ((*valtop)->type)
+			{
+				case TYPE_INT:
+					printf("%d\n", (*valtop)->ival);
+					break;
+				case TYPE_STRING:
+					printf("%s\n", (*valtop)->sval);
+					break;
+				case TYPE_FLOAT:
+					printf("%f\n", (*valtop)->fval);
+					break;
+				case TYPE_BOOL:
+					printf("%s\n", (*valtop)->bval ? "true" : "false");
+					break;
+			}
+		} else {
+			printf("/\n");
 		}
 
 		valtop--;
