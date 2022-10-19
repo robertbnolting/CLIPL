@@ -1851,6 +1851,10 @@ static ValPropPair *searchValueStack(ValPropPair ***stack, char *key)
 		}
 	}
 
+	char *msg = malloc(128);
+	sprintf(msg, "No variable with name %s found.", key);
+	c_error(msg, -1);
+
 	return NULL;
 }
 
@@ -1918,19 +1922,8 @@ static void interpret_assignment_expr(Node *expr, Node ***opstack, ValPropPair *
 		ValPropPair *pair;
 		if (lhs->type == AST_DECLARATION) {
 			pair = searchValueStack(valstack, lhs->vlabel);
-			if (pair == NULL) {
-				char *msg = malloc(128);
-				sprintf(msg, "No variable with name %s found.", lhs->vlabel);
-				c_error(msg, -1);
-				free(msg);
-			}
 		} else {
 			pair = searchValueStack(valstack, lhs->name);
-			if (pair == NULL) {
-				char *msg = malloc(128);
-				sprintf(msg, "No variable with name %s found.", lhs->name);
-				c_error(msg, -1);
-			}
 		}
 
 		switch (rhs->type)
@@ -1953,32 +1946,31 @@ static void interpret_assignment_expr(Node *expr, Node ***opstack, ValPropPair *
 				break;
 			case AST_IDENT:
 				ValPropPair *ident_pair = searchValueStack(valstack, rhs->name);
-				if (ident_pair != NULL) {
-					switch (ident_pair->type)
-					{
-						case TYPE_INT:
-							checkDataType(pair, TYPE_INT);
-							pair->ival = ident_pair->ival;
-							break;
-						case TYPE_STRING:
-							checkDataType(pair, TYPE_STRING);
-							pair->sval = ident_pair->sval;
-							break;
-						case TYPE_FLOAT:
-							checkDataType(pair, TYPE_FLOAT);
-							pair->fval = ident_pair->fval;
-							break;
-						case TYPE_BOOL:
-							checkDataType(pair, TYPE_BOOL);
-							pair->bval = ident_pair->bval;
-							break;
-					}
-					break;
-				} else {
+				if (ident_pair->status == 0) {
 					char *msg = malloc(128);
-					sprintf(msg, "No variable with name %s found.", rhs->name);
+					sprintf(msg, "Assignment to variable %s invalid: %s has not been initialized.", rhs->name, rhs->name);
 					c_error(msg, -1);
 				}
+				switch (ident_pair->type)
+				{
+					case TYPE_INT:
+						checkDataType(pair, TYPE_INT);
+						pair->ival = ident_pair->ival;
+						break;
+					case TYPE_STRING:
+						checkDataType(pair, TYPE_STRING);
+						pair->sval = ident_pair->sval;
+						break;
+					case TYPE_FLOAT:
+						checkDataType(pair, TYPE_FLOAT);
+						pair->fval = ident_pair->fval;
+						break;
+					case TYPE_BOOL:
+						checkDataType(pair, TYPE_BOOL);
+						pair->bval = ident_pair->bval;
+						break;
+				}
+				break;
 			default:
 				c_error("Right-hand side of '=' invalid.", -1);
 		}
@@ -2010,7 +2002,7 @@ static void interpret_binary_expr(int op, Node ***opstack, ValPropPair ***valsta
 	{
 		case AST_INT:
 			if (r_operand->type != AST_INT) {
-				;
+				ValPropPair *ident_pair = searchValueStack(valstack, r_operand->name);
 			} else {
 				switch (op)
 				{
