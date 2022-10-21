@@ -1820,6 +1820,11 @@ static void *pop(void ***top)
 }
 
 typedef struct {
+	void ***top;
+	size_t size;
+} Stack;
+
+typedef struct {
 	char *var_name;
 	int status;	// 0 -> Uninitialized, 1 -> Initialized
 	int type;
@@ -1858,6 +1863,19 @@ static ValPropPair *searchValueStack(ValPropPair ***stack, char *key)
 	return NULL;
 }
 
+static void ***copyStack(void ***stack)
+{
+	void ***ret_stack = calloc(512, sizeof(Node *));
+
+	memcpy(ret_stack, stack, 512);
+
+	return ret_stack;
+}
+
+static void ***mergeStacks(void ***stack1, void ***stack2)
+{
+}
+
 static void sym_interpret(Node *cfg)
 {
 	Node **opstack = calloc(512, sizeof(Node *));
@@ -1868,12 +1886,7 @@ static void sym_interpret(Node *cfg)
 	ValPropPair **valtop = valstack - 1;
 	*valtop = 0;
 
-	Node *last = cfg;
-
-	while (last != NULL) {
-		interpret_expr(last, &optop, &valtop);
-		last = last->successor;
-	}
+	interpret_expr(cfg, &optop, &valtop);
 
 #if SYM_OUTPUT
 	while (*valtop != NULL) {
@@ -2178,30 +2191,42 @@ static void interpret_binary_expr(int op, Node ***opstack, ValPropPair ***valsta
 	}
 }
 
+static void interpret_if_stmt(Node *stmt, Node ***opstack, ValPropPair ***valstack)
+{
+	Node *condition_outcome = pop((void***)opstack);
+
+	int outcome;
+
+	if (condition_outcome->type == AST_INT) {
+		outcome = condition_outcome->ival;
+	} else if (condition_outcome->type == AST_BOOL) {
+		outcome = condition_outcome->bval;
+	} else {
+		c_error("Invalid conditional expression in if statement.", -1);
+	}
+
+	if (!outcome && stmt->false_successor->type == CFG_AUXILIARY_NODE) {
+		stmt->else_reachable = -1;
+	} else {
+		stmt->else_reachable = !outcome;
+	}
+}
+
 static void interpret_expr(Node *expr, Node ***opstack, ValPropPair ***valstack)
 {
+	if (expr == NULL) {
+		return;
+	}
 	switch (expr->type)
 	{
 		case AST_INT:
-			push((void***)opstack, expr);
-			break;
 		case AST_STRING:
-			push((void***)opstack, expr);
-			break;
 		case AST_FLOAT:
-			push((void***)opstack, expr);
-			break;
 		case AST_BOOL:
-			push((void***)opstack, expr);
-			break;
 		case AST_ARRAY:
-			push((void***)opstack, expr);
-			break;
 		case AST_IDENT:
 			push((void***)opstack, expr);
-			break;
-		case AST_IDX_ARRAY:
-			push((void***)opstack, expr);
+			interpret_expr(expr->successor, opstack, valstack);
 			break;
 		case AST_ADD:
 		case AST_SUB:
@@ -2214,12 +2239,37 @@ static void interpret_expr(Node *expr, Node ***opstack, ValPropPair ***valstack)
 		case AST_GE:
 		case AST_LE:
 			interpret_binary_expr(expr->type, opstack, valstack);
+			interpret_expr(expr->successor, opstack, valstack);
 			break;
 		case AST_DECLARATION:
 			interpret_declaration_expr(expr, opstack, valstack);
+			interpret_expr(expr->successor, opstack, valstack);
 			break;
 		case AST_ASSIGN:
 			interpret_assignment_expr(expr, opstack, valstack);
+			interpret_expr(expr->successor, opstack, valstack);
 			break;
+		/*
+		case AST_IF_STMT:
+		{
+			interpret_if_stmt(expr, opstack, valstack);
+
+			// make copy of list and then merge
+
+			Node ***opstack_then = copyStack((void***)opstack);
+			ValPropPair ***valstack_then = copyStack((void***)valstack)
+
+			Node ***opstack_else = copyStack((void***)opstack);
+			ValPropPair ***valstack_else = copyStack((void***)valstack)
+
+			interpret_expr(expr->successor, opstack_then, valstack_then);
+			interpret_expr(expr->false_successor, opstack_else, valstack_else);
+
+			opstack = mergeStacks(opstack_then, opstack_else);
+			valstack = mergeStacks(valstack_then, valstack_else);
+
+			break;
+		}
+		*/
 	}
 }
