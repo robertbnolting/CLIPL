@@ -264,6 +264,8 @@ static const char *datatypeToString(int type)
 			return "float";
 		case TYPE_BOOL:
 			return "bool";
+		default:
+			return NULL;
 	}
 }
 
@@ -1805,28 +1807,41 @@ static void thread_expression(Node *expr)
 	}
 }
 
-static void push(void ***top, void *n)
-{
-	(*top)++;
-	**top = n;
-}
-
-static void *pop(void ***top)
-{
-	void *n = **top;
-	(*top)--;
-
-	return n;
-}
-
 typedef struct {
-	void ***top;
+	void **start;
+	void **top;
 	size_t size;
 } Stack;
 
+static void push(Stack *stack, void *item)
+{
+	stack->top++;
+	*(stack->top) = item;
+	stack->size++;
+}
+
+static void *pop(Stack *stack)
+{
+	void *item = *(stack->top);
+	stack->top--;
+	stack->size--;
+
+	return item;
+}
+
+Stack *init_stack(size_t n_alloc)
+{
+	Stack *tmp = malloc(sizeof(Stack));
+	tmp->start = calloc(n_alloc, sizeof(void *));
+	tmp->top = tmp->start - 1;
+	tmp->size = 0;
+
+	return tmp;
+}
+
 typedef struct {
 	char *var_name;
-	int status;	// 0 -> Uninitialized, 1 -> Initialized
+	int status;	// 0 -> Uninitialized, 1 -> Initialized, 2 -> MaybeInitialized
 	int type;
 	union {
 		int ival;
@@ -1845,14 +1860,11 @@ static ValPropPair *makeValPropPair(ValPropPair *tmp)
 	return r;
 }
 
-static ValPropPair *searchValueStack(ValPropPair ***stack, char *key)
+static ValPropPair *searchValueStack(Stack *stack, char *key)
 {
-	ValPropPair **current = *stack;
-	while (*current != NULL) {
-		if (!strcmp((*current)->var_name, key)) { 
-			return *current; 
-		} else {
-			current--;
+	for (int i = 0; i < stack->size; i++) {
+		if (!strcmp(((ValPropPair *)stack->start[i])->var_name, key)) { 
+			return (ValPropPair *) stack->start[i];
 		}
 	}
 
@@ -1863,56 +1875,88 @@ static ValPropPair *searchValueStack(ValPropPair ***stack, char *key)
 	return NULL;
 }
 
-static void ***copyStack(void ***stack)
+static Stack *copyOpStack(Stack *stack)
 {
-	void ***ret_stack = calloc(512, sizeof(Node *));
+	Stack *ret_stack = init_stack(512);
 
-	memcpy(ret_stack, stack, 512);
+	for (int i = 0; i < stack->size; i++) {
+		ret_stack->start[i] = malloc(sizeof(Node));
+		memcpy(ret_stack->start[i], stack->start[i], sizeof(Node));
+	}
+
+	ret_stack->top = (stack->start + stack->size) - 1;
+	ret_stack->size = stack->size;
 
 	return ret_stack;
 }
 
-static void ***mergeStacks(void ***stack1, void ***stack2)
+static Stack *copyValStack(Stack *stack)
 {
+	Stack *ret_stack = init_stack(512);
+
+	for (int i = 0; i < stack->size; i++) {
+		ret_stack->start[i] = malloc(sizeof(ValPropPair));
+		memcpy(ret_stack->start[i], stack->start[i], sizeof(ValPropPair));
+	}
+
+	ret_stack->top = (stack->start + stack->size) - 1;
+	ret_stack->size = stack->size;
+
+	return ret_stack;
+}
+
+void mergeValueStacks(Stack *stack1, Stack *stack2, Stack *oldstack)
+{
+	ValPropPair *old_pair;
+
+	for (int i = 0; i < stack1->size; i++)
+	{
+#define stack1Element ((ValPropPair *) stack1->start[i])
+		if ((old_pair = searchValueStack(oldstack, stack1Element->var_name))) {	// anything else is restricted to the then-scope
+			if (stack2) {
+				ValPropPair *stack2Element = searchValueStack(stack2, stack1Element->var_name);
+				if ((!old_pair->status && stack1Element->status && !stack2Element->status) ||
+				    (!old_pair->status && !stack1Element->status && stack2Element->status))
+				{
+					stack1Element->status = 2;
+				}
+			}
+		}
+	}
 }
 
 static void sym_interpret(Node *cfg)
 {
-	Node **opstack = calloc(512, sizeof(Node *));
-	Node **optop = opstack - 1;
-	*optop = 0;
+	Stack *opstack = init_stack(512);
+	Stack *valstack = init_stack(512);
 
-	ValPropPair **valstack = calloc(512, sizeof(ValPropPair *));
-	ValPropPair **valtop = valstack - 1;
-	*valtop = 0;
-
-	interpret_expr(cfg, &optop, &valtop);
+	interpret_expr(cfg, &opstack, &valstack);
 
 #if SYM_OUTPUT
-	while (*valtop != NULL) {
-		printf("NAME: %s | STATUS: %s | TYPE: %s | VALUE: ", (*valtop)->var_name,
-			(*valtop)->status ? "Initialized" : "Uninitialized", datatypeToString((*valtop)->type));
-		if ((*valtop)->status) {
-			switch ((*valtop)->type)
+	for (int i = 0; i < valstack->size; i++) {
+		printf("NAME: %s | STATUS: %s | TYPE: %s | VALUE: ", ((ValPropPair *)valstack->start[i])->var_name,
+			((ValPropPair *)valstack->start[i])->status ? (((ValPropPair *)valstack->start[i])->status == 1 ? "Initialized" : "Maybe initialized") 
+			: "Uninitialized", datatypeToString(((ValPropPair *)valstack->start[i])->type));
+
+		if (((ValPropPair *)valstack->start[i])->status) {
+			switch (((ValPropPair *)valstack->start[i])->type)
 			{
 				case TYPE_INT:
-					printf("%d\n", (*valtop)->ival);
+					printf("%d\n", ((ValPropPair *)valstack->start[i])->ival);
 					break;
 				case TYPE_STRING:
-					printf("%s\n", (*valtop)->sval);
+					printf("%s\n", ((ValPropPair *)valstack->start[i])->sval);
 					break;
 				case TYPE_FLOAT:
-					printf("%f\n", (*valtop)->fval);
+					printf("%f\n", ((ValPropPair *)valstack->start[i])->fval);
 					break;
 				case TYPE_BOOL:
-					printf("%s\n", (*valtop)->bval ? "true" : "false");
+					printf("%s\n", ((ValPropPair *)valstack->start[i])->bval ? "true" : "false");
 					break;
 			}
 		} else {
 			printf("/\n");
 		}
-
-		valtop--;
 	}
 #endif
 }
@@ -1926,10 +1970,10 @@ static void checkDataType(ValPropPair *pair, int type)
 	}
 }
 
-static void interpret_assignment_expr(Node *expr, Node ***opstack, ValPropPair ***valstack)
+static void interpret_assignment_expr(Node *expr, Stack *opstack, Stack *valstack)
 {
-	Node *rhs = pop((void***)opstack);
-	Node *lhs = pop((void***)opstack);
+	Node *rhs = (Node *) pop(opstack);
+	Node *lhs = (Node *) pop(opstack);
 
 	if (lhs->type == AST_DECLARATION || lhs->type == AST_IDENT) {
 		ValPropPair *pair;
@@ -1993,18 +2037,18 @@ static void interpret_assignment_expr(Node *expr, Node ***opstack, ValPropPair *
 	}
 }
 
-static void interpret_declaration_expr(Node *expr, Node ***opstack, ValPropPair ***valstack)
+static void interpret_declaration_expr(Node *expr, Stack *opstack, Stack *valstack)
 {
 	ValPropPair *pair = makeValPropPair(&(ValPropPair){expr->vlabel, 0, expr->vtype});
 
-	push((void***)valstack, pair);
-	push((void***)opstack, expr);
+	push(valstack, pair);
+	push(opstack, expr);
 }
 
-static void interpret_binary_expr(int op, Node ***opstack, ValPropPair ***valstack)
+static void interpret_binary_expr(int op, Stack *opstack, Stack *valstack)
 {
-	Node *r_operand = pop((void***)opstack);
-	Node *l_operand = pop((void***)opstack);
+	Node *r_operand = (Node *) pop(opstack);
+	Node *l_operand = (Node *) pop(opstack);
 
 	if ((r_operand->type != l_operand->type) && !( (r_operand->type == AST_IDENT || r_operand->type == AST_IDX_ARRAY) 
 				|| (l_operand->type == AST_IDENT || l_operand->type == AST_IDX_ARRAY) )) {
@@ -2030,34 +2074,34 @@ static void interpret_binary_expr(int op, Node ***opstack, ValPropPair ***valsta
 			switch (op)
 			{
 				case AST_ADD:
-					push((void***)opstack, ast_inttype(l + r));
+					push(opstack, ast_inttype(l + r));
 					break;
 				case AST_SUB:
-					push((void***)opstack, ast_inttype(l - r));
+					push(opstack, ast_inttype(l - r));
 					break;
 				case AST_MUL:
-					push((void***)opstack, ast_inttype(l * r));
+					push(opstack, ast_inttype(l * r));
 					break;
 				case AST_DIV:
-					push((void***)opstack, ast_inttype(l / r));
+					push(opstack, ast_inttype(l / r));
 					break;
 				case AST_GT:
-					push((void***)opstack, ast_booltype(l > r));
+					push(opstack, ast_booltype(l > r));
 					break;
 				case AST_LT:
-					push((void***)opstack, ast_booltype(l < r));
+					push(opstack, ast_booltype(l < r));
 					break;
 				case AST_EQ:
-					push((void***)opstack, ast_booltype(l == r));
+					push(opstack, ast_booltype(l == r));
 					break;
 				case AST_NE:
-					push((void***)opstack, ast_booltype(l != r));
+					push(opstack, ast_booltype(l != r));
 					break;
 				case AST_GE:
-					push((void***)opstack, ast_booltype(l >= r));
+					push(opstack, ast_booltype(l >= r));
 					break;
 				case AST_LE:
-					push((void***)opstack, ast_booltype(l <= r));
+					push(opstack, ast_booltype(l <= r));
 					break;
 			}
 		}
@@ -2080,10 +2124,10 @@ static void interpret_binary_expr(int op, Node ***opstack, ValPropPair ***valsta
 				case AST_ADD:
 					char *comp_string = malloc(strlen(l) + strlen(r) + 1);
 					strcpy(comp_string, l);
-					push((void***)opstack, ast_stringtype(strcat(comp_string, r)));
+					push(opstack, ast_stringtype(strcat(comp_string, r)));
 					break;
 				case AST_EQ:
-					push((void***)opstack, ast_booltype(!strcmp(l, r)));
+					push(opstack, ast_booltype(!strcmp(l, r)));
 					break;
 				default:
 					c_error("Illegal operation on value with type 'string'.", -1);
@@ -2119,34 +2163,34 @@ static void interpret_binary_expr(int op, Node ***opstack, ValPropPair ***valsta
 					switch (op)
 					{
 						case AST_ADD:
-							push((void***)opstack, ast_inttype(l + r));
+							push(opstack, ast_inttype(l + r));
 							break;
 						case AST_SUB:
-							push((void***)opstack, ast_inttype(l - r));
+							push(opstack, ast_inttype(l - r));
 							break;
 						case AST_MUL:
-							push((void***)opstack, ast_inttype(l * r));
+							push(opstack, ast_inttype(l * r));
 							break;
 						case AST_DIV:
-							push((void***)opstack, ast_inttype(l / r));
+							push(opstack, ast_inttype(l / r));
 							break;
 						case AST_GT:
-							push((void***)opstack, ast_booltype(l > r));
+							push(opstack, ast_booltype(l > r));
 							break;
 						case AST_LT:
-							push((void***)opstack, ast_booltype(l < r));
+							push(opstack, ast_booltype(l < r));
 							break;
 						case AST_EQ:
-							push((void***)opstack, ast_booltype(l == r));
+							push(opstack, ast_booltype(l == r));
 							break;
 						case AST_NE:
-							push((void***)opstack, ast_booltype(l != r));
+							push(opstack, ast_booltype(l != r));
 							break;
 						case AST_GE:
-							push((void***)opstack, ast_booltype(l >= r));
+							push(opstack, ast_booltype(l >= r));
 							break;
 						case AST_LE:
-							push((void***)opstack, ast_booltype(l <= r));
+							push(opstack, ast_booltype(l <= r));
 							break;
 					}
 
@@ -2176,10 +2220,10 @@ static void interpret_binary_expr(int op, Node ***opstack, ValPropPair ***valsta
 						case AST_ADD:
 							char *comp_string = malloc(strlen(l) + strlen(r) + 1);
 							strcpy(comp_string, l);
-							push((void***)opstack, ast_stringtype(strcat(comp_string, r)));
+							push(opstack, ast_stringtype(strcat(comp_string, r)));
 							break;
 						case AST_EQ:
-							push((void***)opstack, ast_booltype(!strcmp(l, r)));
+							push(opstack, ast_booltype(!strcmp(l, r)));
 							break;
 						default:
 							c_error("Illegal operation on value with type 'string'.", -1);
@@ -2191,9 +2235,9 @@ static void interpret_binary_expr(int op, Node ***opstack, ValPropPair ***valsta
 	}
 }
 
-static void interpret_if_stmt(Node *stmt, Node ***opstack, ValPropPair ***valstack)
+static void interpret_if_stmt(Node *stmt, Stack *opstack, Stack *valstack)
 {
-	Node *condition_outcome = pop((void***)opstack);
+	Node *condition_outcome = (Node *) pop(opstack);
 
 	int outcome;
 
@@ -2205,16 +2249,16 @@ static void interpret_if_stmt(Node *stmt, Node ***opstack, ValPropPair ***valsta
 		c_error("Invalid conditional expression in if statement.", -1);
 	}
 
-	if (!outcome && stmt->false_successor->type == CFG_AUXILIARY_NODE) {
+	if (!outcome && stmt->false_successor == NULL) {
 		stmt->else_reachable = -1;
 	} else {
 		stmt->else_reachable = !outcome;
 	}
 }
 
-static void interpret_expr(Node *expr, Node ***opstack, ValPropPair ***valstack)
+static void interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 {
-	if (expr == NULL) {
+	if (expr == NULL || expr->type == CFG_JOIN_NODE) {
 		return;
 	}
 	switch (expr->type)
@@ -2225,7 +2269,7 @@ static void interpret_expr(Node *expr, Node ***opstack, ValPropPair ***valstack)
 		case AST_BOOL:
 		case AST_ARRAY:
 		case AST_IDENT:
-			push((void***)opstack, expr);
+			push(*opstack, expr);
 			interpret_expr(expr->successor, opstack, valstack);
 			break;
 		case AST_ADD:
@@ -2238,38 +2282,47 @@ static void interpret_expr(Node *expr, Node ***opstack, ValPropPair ***valstack)
 		case AST_NE:
 		case AST_GE:
 		case AST_LE:
-			interpret_binary_expr(expr->type, opstack, valstack);
+			interpret_binary_expr(expr->type, *opstack, *valstack);
 			interpret_expr(expr->successor, opstack, valstack);
 			break;
 		case AST_DECLARATION:
-			interpret_declaration_expr(expr, opstack, valstack);
+			interpret_declaration_expr(expr, *opstack, *valstack);
 			interpret_expr(expr->successor, opstack, valstack);
 			break;
 		case AST_ASSIGN:
-			interpret_assignment_expr(expr, opstack, valstack);
+			interpret_assignment_expr(expr, *opstack, *valstack);
 			interpret_expr(expr->successor, opstack, valstack);
 			break;
-		/*
 		case AST_IF_STMT:
 		{
-			interpret_if_stmt(expr, opstack, valstack);
+			interpret_if_stmt(expr, *opstack, *valstack);
 
-			// make copy of list and then merge
+			Stack *opstack_then = copyOpStack(*opstack);
+			Stack *valstack_then = copyValStack(*valstack);
 
-			Node ***opstack_then = copyStack((void***)opstack);
-			ValPropPair ***valstack_then = copyStack((void***)valstack)
+			interpret_expr(expr->successor, &opstack_then, &valstack_then);
 
-			Node ***opstack_else = copyStack((void***)opstack);
-			ValPropPair ***valstack_else = copyStack((void***)valstack)
+			if (expr->false_successor) {
+				Stack *opstack_else = copyOpStack(*opstack);
+				Stack *valstack_else = copyValStack(*valstack);
 
-			interpret_expr(expr->successor, opstack_then, valstack_then);
-			interpret_expr(expr->false_successor, opstack_else, valstack_else);
+				interpret_expr(expr->false_successor, &opstack_else, &valstack_else);
 
-			opstack = mergeStacks(opstack_then, opstack_else);
-			valstack = mergeStacks(valstack_then, valstack_else);
+				if (!expr->else_reachable) {
+					mergeValueStacks(valstack_then, valstack_else, *valstack);
+					*valstack = valstack_then;
+					free(valstack_else);
+				} else if (expr->else_reachable && expr->else_reachable > 0) {
+					mergeValueStacks(valstack_else, valstack_then, *valstack);
+					*valstack = valstack_else;
+					free(valstack_then);
+				}
+			} else {
+				mergeValueStacks(valstack_then, NULL, *valstack);
+				*valstack = valstack_then;
+			}
 
 			break;
 		}
-		*/
 	}
 }
