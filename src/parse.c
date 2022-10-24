@@ -78,7 +78,7 @@ static void printNode();
 
 // Symbolic interpretation
 static void sym_interpret();
-static void interpret_expr();
+static Node *interpret_expr();
 static void interpret_assignment_expr();
 static void interpret_declaration_expr();
 
@@ -1868,10 +1868,6 @@ static ValPropPair *searchValueStack(Stack *stack, char *key)
 		}
 	}
 
-	char *msg = malloc(128);
-	sprintf(msg, "No variable with name %s found.", key);
-	c_error(msg, -1);
-
 	return NULL;
 }
 
@@ -1884,7 +1880,7 @@ static Stack *copyOpStack(Stack *stack)
 		memcpy(ret_stack->start[i], stack->start[i], sizeof(Node));
 	}
 
-	ret_stack->top = (stack->start + stack->size) - 1;
+	ret_stack->top = &(ret_stack->start[stack->size - 1]);
 	ret_stack->size = stack->size;
 
 	return ret_stack;
@@ -1899,30 +1895,38 @@ static Stack *copyValStack(Stack *stack)
 		memcpy(ret_stack->start[i], stack->start[i], sizeof(ValPropPair));
 	}
 
-	ret_stack->top = (stack->start + stack->size) - 1;
+	ret_stack->top = &(ret_stack->start[stack->size - 1]);
 	ret_stack->size = stack->size;
 
 	return ret_stack;
 }
 
-void mergeValueStacks(Stack *stack1, Stack *stack2, Stack *oldstack)
+static Stack *mergeValueStacks(Stack *stack1, Stack *stack2, Stack *oldstack)
 {
+	Stack *ret_stack = init_stack(512);
 	ValPropPair *old_pair;
 
 	for (int i = 0; i < stack1->size; i++)
 	{
 #define stack1Element ((ValPropPair *) stack1->start[i])
-		if ((old_pair = searchValueStack(oldstack, stack1Element->var_name))) {	// anything else is restricted to the then-scope
+		if ((old_pair = searchValueStack(oldstack, stack1Element->var_name))) {	// anything else is restricted to the then- or else-scope
 			if (stack2) {
 				ValPropPair *stack2Element = searchValueStack(stack2, stack1Element->var_name);
 				if ((!old_pair->status && stack1Element->status && !stack2Element->status) ||
 				    (!old_pair->status && !stack1Element->status && stack2Element->status))
 				{
 					stack1Element->status = 2;
+					push(ret_stack, stack1Element);
+				} else if (!old_pair->status && stack1Element->status && stack2Element->status) {
+					push(ret_stack, stack1Element);
 				}
+			} else {
+				push(ret_stack, stack1Element);
 			}
 		}
 	}
+
+	return ret_stack;
 }
 
 static void sym_interpret(Node *cfg)
@@ -1979,8 +1983,18 @@ static void interpret_assignment_expr(Node *expr, Stack *opstack, Stack *valstac
 		ValPropPair *pair;
 		if (lhs->type == AST_DECLARATION) {
 			pair = searchValueStack(valstack, lhs->vlabel);
+			if (!pair) {
+				char *msg = malloc(128);
+				sprintf(msg, "No variable with name %s found.", lhs->vlabel);
+				c_error(msg, -1);
+			}
 		} else {
 			pair = searchValueStack(valstack, lhs->name);
+			if (!pair) {
+				char *msg = malloc(128);
+				sprintf(msg, "No variable with name %s found.", lhs->name);
+				c_error(msg, -1);
+			}
 		}
 
 		switch (rhs->type)
@@ -2003,6 +2017,11 @@ static void interpret_assignment_expr(Node *expr, Stack *opstack, Stack *valstac
 				break;
 			case AST_IDENT:
 				ValPropPair *ident_pair = searchValueStack(valstack, rhs->name);
+				if (!ident_pair) {
+					char *msg = malloc(128);
+					sprintf(msg, "No variable with name %s found.", rhs->name);
+					c_error(msg, -1);
+				}
 				if (ident_pair->status == 0) {
 					char *msg = malloc(128);
 					sprintf(msg, "Assignment to variable %s invalid: %s has not been initialized.", rhs->name, rhs->name);
@@ -2039,6 +2058,12 @@ static void interpret_assignment_expr(Node *expr, Stack *opstack, Stack *valstac
 
 static void interpret_declaration_expr(Node *expr, Stack *opstack, Stack *valstack)
 {
+	if (searchValueStack(valstack, expr->vlabel)) {
+		char msg[128];
+		sprintf(msg, "Declaration of variable %s is invalid: %s has already been declared.", expr->vlabel, expr->vlabel);
+		c_error(msg, -1);
+	}
+
 	ValPropPair *pair = makeValPropPair(&(ValPropPair){expr->vlabel, 0, expr->vtype});
 
 	push(valstack, pair);
@@ -2064,8 +2089,18 @@ static void interpret_binary_expr(int op, Stack *opstack, Stack *valstack)
 			int r;
 			if (r_operand->type != AST_INT) {
 				ValPropPair *ident_pair = searchValueStack(valstack, r_operand->name);
+				if (!ident_pair) {
+					char *msg = malloc(128);
+					sprintf(msg, "No variable with name %s found.", r_operand->name);
+					c_error(msg, -1);
+				}
 				if (ident_pair->type != TYPE_INT) {
 					c_error("Operands of binary operation must be of the same type.", -1);
+				}
+				if (ident_pair->status == 0) {
+					c_error("Right operand of binary operation not initialized.", -1);
+				} else if (ident_pair->status == 2) {
+					c_warning("Right operand of binary operation may not be initialized.", -1);
 				}
 				r = ident_pair->ival;
 			} else {
@@ -2112,9 +2147,21 @@ static void interpret_binary_expr(int op, Stack *opstack, Stack *valstack)
 			char *r;
 			if (r_operand->type != AST_STRING) {
 				ValPropPair *ident_pair = searchValueStack(valstack, r_operand->name);
+				if (!ident_pair) {
+					char *msg = malloc(128);
+					sprintf(msg, "No variable with name %s found.", r_operand->name);
+					c_error(msg, -1);
+				}
 				if (ident_pair->type != TYPE_STRING) {
 					c_error("Operands of binary operation must be of the same type.", -1);
 				}
+
+				if (ident_pair->status == 0) {
+					c_error("Right operand of binary operation not initialized.", -1);
+				} else if (ident_pair->status == 2) {
+					c_warning("Right operand of binary operation may not be initialized.", -1);
+				}
+
 				r = ident_pair->sval;
 			} else {
 				r = r_operand->sval;
@@ -2138,6 +2185,19 @@ static void interpret_binary_expr(int op, Stack *opstack, Stack *valstack)
 		case AST_IDENT:
 		{
 			ValPropPair *l_op_pair = searchValueStack(valstack, l_operand->name);
+
+			if (!l_op_pair) {
+					char *msg = malloc(128);
+					sprintf(msg, "No variable with name %s found.", l_operand->name);
+					c_error(msg, -1);
+			}
+
+			if (l_op_pair->status == 0) {
+				c_error("Left operand of binary operation not initialized.", -1);
+			} else if (l_op_pair->status == 2) {
+				c_warning("Left operand of binary operation may not be initialized.", -1);
+			}
+
 			switch (l_op_pair->type)
 			{
 				case TYPE_INT:
@@ -2151,9 +2211,21 @@ static void interpret_binary_expr(int op, Stack *opstack, Stack *valstack)
 							break;
 						case AST_IDENT:
 							ValPropPair *r_op_pair = searchValueStack(valstack, r_operand->name);
+							if (!l_op_pair) {
+								char *msg = malloc(128);
+								sprintf(msg, "No variable with name %s found.", r_operand->name);
+								c_error(msg, -1);
+							}
 							if (r_op_pair->type != TYPE_INT) {
 								c_error("Operands of binary operation must be of the same type.", -1);
 							}
+
+							if (r_op_pair->status == 0) {
+								c_error("Right operand of binary operation not initialized.", -1);
+							} else if (r_op_pair->status == 2) {
+								c_warning("Right operand of binary operation may not be initialized.", -1);
+							}
+
 							r = r_op_pair->ival;
 							break;
 						default:
@@ -2207,9 +2279,22 @@ static void interpret_binary_expr(int op, Stack *opstack, Stack *valstack)
 							break;
 						case AST_IDENT:
 							ValPropPair *r_op_pair = searchValueStack(valstack, r_operand->name);
+							if (!l_op_pair) {
+								char *msg = malloc(128);
+								sprintf(msg, "No variable with name %s found.", r_operand->name);
+								c_error(msg, -1);
+							}
+
 							if (r_op_pair->type != TYPE_STRING) {
 								c_error("Operands of binary operation must be of the same type.", -1);
 							}
+
+							if (r_op_pair->status == 0) {
+								c_error("Right operand of binary operation not initialized.", -1);
+							} else if (r_op_pair->status == 2) {
+								c_warning("Right operand of binary operation may not be initialized.", -1);
+							}
+
 							r = r_op_pair->sval;
 							break;
 						default:
@@ -2256,10 +2341,10 @@ static void interpret_if_stmt(Node *stmt, Stack *opstack, Stack *valstack)
 	}
 }
 
-static void interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
+static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 {
 	if (expr == NULL || expr->type == CFG_JOIN_NODE) {
-		return;
+		return expr;
 	}
 	switch (expr->type)
 	{
@@ -2295,12 +2380,13 @@ static void interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 			break;
 		case AST_IF_STMT:
 		{
+			Node *end_if;
 			interpret_if_stmt(expr, *opstack, *valstack);
 
 			Stack *opstack_then = copyOpStack(*opstack);
 			Stack *valstack_then = copyValStack(*valstack);
 
-			interpret_expr(expr->successor, &opstack_then, &valstack_then);
+			end_if = interpret_expr(expr->successor, &opstack_then, &valstack_then);
 
 			if (expr->false_successor) {
 				Stack *opstack_else = copyOpStack(*opstack);
@@ -2309,18 +2395,22 @@ static void interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 				interpret_expr(expr->false_successor, &opstack_else, &valstack_else);
 
 				if (!expr->else_reachable) {
-					mergeValueStacks(valstack_then, valstack_else, *valstack);
-					*valstack = valstack_then;
-					free(valstack_else);
-				} else if (expr->else_reachable && expr->else_reachable > 0) {
-					mergeValueStacks(valstack_else, valstack_then, *valstack);
-					*valstack = valstack_else;
+					*valstack = mergeValueStacks(valstack_then, valstack_else, *valstack);
 					free(valstack_then);
+					free(valstack_else);
+				} else if (expr->else_reachable) {
+					*valstack = mergeValueStacks(valstack_else, valstack_then, *valstack);
+					free(valstack_then);
+					free(valstack_else);
 				}
 			} else {
-				mergeValueStacks(valstack_then, NULL, *valstack);
-				*valstack = valstack_then;
+				if (expr->else_reachable > 0) {
+					*valstack = mergeValueStacks(valstack_then, NULL, *valstack);
+				}
+				free(valstack_then);
 			}
+
+			interpret_expr(end_if->successor, opstack, valstack);
 
 			break;
 		}
