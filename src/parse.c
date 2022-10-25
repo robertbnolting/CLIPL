@@ -86,6 +86,9 @@ static void interpret_declaration_expr();
 static Node **global_functions;
 static size_t global_function_count;
 
+static Node **global_records;
+static size_t global_record_count;
+
 void parser_init()
 {
 	pos = 0;
@@ -104,8 +107,23 @@ void parser_init()
 		}
 	}
 
-	global_functions = node_array;
-	global_function_count = array_len;
+	global_functions = NULL;
+	global_function_count = 0;
+
+	global_records = NULL;
+	global_record_count = 0;
+
+	for (int i = 0; i < array_len; i++) {
+		if (node_array[i]->type == AST_FUNCTION_DEF) {
+			global_functions = realloc(global_functions, (global_function_count+1) * sizeof(Node*));
+			global_functions[global_function_count] = node_array[i];
+			global_function_count++;
+		} else {
+			global_records = realloc(global_records, (global_record_count+1) * sizeof(Node*));
+			global_records[global_record_count] = node_array[i];
+			global_record_count++;
+		}
+	}
 
 	Node *cfg_array = thread_ast();
 
@@ -323,6 +341,9 @@ static void printNode(Node *n)
 			break;
 		case AST_FUNCTION_CALL:
 			printf("(CALL %s)\n", n->call_label);
+			break;
+		case AST_RECORD_DEF:
+			printf("(RECORD DEFINITION: %s)", n->rlabel);
 			break;
 
 		case AST_ADD:
@@ -1620,8 +1641,19 @@ static Node *read_ident(Token_type *tok, int no_brackets)
 static Node *find_function(char *name)
 {
 	for (int i = 0; i < global_function_count; i++) {
-		if(!strcmp(global_functions[i]->flabel, name)) {
+		if (!strcmp(global_functions[i]->flabel, name)) {
 			return global_functions[i];
+		}
+	}
+
+	return NULL;
+}
+
+static Node *find_record(char *name)
+{
+	for (int i = 0; i < global_record_count; i++) {
+		if (!strcmp(global_records[i]->rlabel, name)) {
+			return global_records[i];
 		}
 	}
 
@@ -1654,7 +1686,7 @@ static Node *thread_ast()
 			return tmp.successor;
 		}
 	}
-	
+
 	c_error("No main function defined.");
 	return 0;
 }
@@ -1684,6 +1716,7 @@ static void thread_expression(Node *expr)
 		case AST_STRING:
 		case AST_BOOL:
 		case AST_FIELD_ACCESS:
+		case AST_RECORD_DEF:
 		case AST_DECLARATION:
 			last_node->successor = expr;
 			last_node = expr;
@@ -1840,6 +1873,11 @@ Stack *init_stack(size_t n_alloc)
 }
 
 typedef struct {
+	void **array;
+	size_t size;
+} Vector;
+
+typedef struct ValPropPair {
 	char *var_name;
 	int status;	// 0 -> Uninitialized, 1 -> Initialized, 2 -> MaybeInitialized
 	int type;
@@ -1848,6 +1886,7 @@ typedef struct {
 		char *sval;
 		float fval;
 		int bval;
+		Vector record_vec;
 	};
 } ValPropPair;
 
@@ -1938,30 +1977,62 @@ static void sym_interpret(Node *cfg)
 
 #if SYM_OUTPUT
 	for (int i = 0; i < valstack->size; i++) {
-		printf("NAME: %s | STATUS: %s | TYPE: %s | VALUE: ", ((ValPropPair *)valstack->start[i])->var_name,
-			((ValPropPair *)valstack->start[i])->status ? (((ValPropPair *)valstack->start[i])->status == 1 ? "Initialized" : "Maybe initialized") 
-			: "Uninitialized", datatypeToString(((ValPropPair *)valstack->start[i])->type));
-
-		if (((ValPropPair *)valstack->start[i])->status) {
-			switch (((ValPropPair *)valstack->start[i])->type)
-			{
-				case TYPE_INT:
-					printf("%d\n", ((ValPropPair *)valstack->start[i])->ival);
-					break;
-				case TYPE_STRING:
-					printf("%s\n", ((ValPropPair *)valstack->start[i])->sval);
-					break;
-				case TYPE_FLOAT:
-					printf("%f\n", ((ValPropPair *)valstack->start[i])->fval);
-					break;
-				case TYPE_BOOL:
-					printf("%s\n", ((ValPropPair *)valstack->start[i])->bval ? "true" : "false");
-					break;
+#define current ((ValPropPair *)valstack->start[i])
+		if (current->type != TYPE_RECORD) {
+			printf("NAME: %s | STATUS: %s | TYPE: %s | VALUE: ", current->var_name,
+				current->status ? (current->status == 1 ? "Initialized" : "Maybe initialized") 
+				: "Uninitialized", datatypeToString(current->type));
+			if (current->status) {
+				switch (current->type)
+				{
+					case TYPE_INT:
+						printf("%d\n", current->ival);
+						break;
+					case TYPE_STRING:
+						printf("%s\n", current->sval);
+						break;
+					case TYPE_FLOAT:
+						printf("%f\n", current->fval);
+						break;
+					case TYPE_BOOL:
+						printf("%s\n", current->bval ? "true" : "false");
+						break;
+				}
+			} else {
+				printf("/\n");
 			}
 		} else {
-			printf("/\n");
-		}
+			printf("NAME: %s | FIELDS:\n", current->var_name);
+			for (int j = 0; j < current->record_vec.size; j++) {
+#define current_field ((ValPropPair *) current->record_vec.array[j])
+				printf("\tNAME: %s | STATUS: %s | TYPE: %s | VALUE: ", current_field->var_name,
+					current_field->status ? (current_field->status == 1 ? "Initialized" : "Maybe initialized") : "Uninitialized", 
+					datatypeToString(current_field->type));
+
+				if (current_field->status) {
+					switch (current_field->type)
+					{
+						case TYPE_INT:
+							printf("%d\n", current_field->ival);
+							break;
+						case TYPE_STRING:
+							printf("%s\n", current_field->sval);
+							break;
+						case TYPE_FLOAT:
+							printf("%f\n", current_field->fval);
+							break;
+						case TYPE_BOOL:
+							printf("%s\n", current_field->bval ? "true" : "false");
+							break;
+					}
+				} else {
+					printf("/\n");
+				}
+			}
+		}	
 	}
+#undef current_field
+#undef current
 #endif
 }
 
@@ -1974,12 +2045,25 @@ static void checkDataType(ValPropPair *pair, int type)
 	}
 }
 
+static ValPropPair *findFieldInPair(ValPropPair *pair, char *field_name)
+{
+	for (int i = 0; i < pair->record_vec.size; i++) {
+		if (!strcmp(((ValPropPair *) pair->record_vec.array[i])->var_name, field_name)) {
+			return (ValPropPair*) pair->record_vec.array[i];
+		}
+	}
+
+	char msg[128];
+	sprintf(msg, "Record %s has no field with name %s.", pair->var_name, field_name);
+	c_error(msg, -1);
+}
+
 static void interpret_assignment_expr(Node *expr, Stack *opstack, Stack *valstack)
 {
 	Node *rhs = (Node *) pop(opstack);
 	Node *lhs = (Node *) pop(opstack);
 
-	if (lhs->type == AST_DECLARATION || lhs->type == AST_IDENT) {
+	if (lhs->type == AST_DECLARATION || lhs->type == AST_IDENT || lhs->type == AST_FIELD_ACCESS) {
 		ValPropPair *pair;
 		if (lhs->type == AST_DECLARATION) {
 			pair = searchValueStack(valstack, lhs->vlabel);
@@ -1988,13 +2072,21 @@ static void interpret_assignment_expr(Node *expr, Stack *opstack, Stack *valstac
 				sprintf(msg, "No variable with name %s found.", lhs->vlabel);
 				c_error(msg, -1);
 			}
-		} else {
+		} else if (lhs->type == AST_IDENT) {
 			pair = searchValueStack(valstack, lhs->name);
 			if (!pair) {
 				char *msg = malloc(128);
 				sprintf(msg, "No variable with name %s found.", lhs->name);
 				c_error(msg, -1);
 			}
+		} else {
+			pair = searchValueStack(valstack, lhs->access_rlabel->name);
+			if (!pair) {
+				char msg[128];
+				sprintf(msg, "No record declaration with name %s found.", lhs->access_rlabel->name);
+				c_error(msg, -1);
+			}
+			pair = findFieldInPair(pair, lhs->access_field->name);
 		}
 
 		switch (rhs->type)
@@ -2065,6 +2157,21 @@ static void interpret_declaration_expr(Node *expr, Stack *opstack, Stack *valsta
 	}
 
 	ValPropPair *pair = makeValPropPair(&(ValPropPair){expr->vlabel, 0, expr->vtype});
+
+	if (expr->vtype == TYPE_RECORD) {
+		Node *record;
+		if ((record = find_record(expr->vrlabel))) {
+			pair->record_vec.array = malloc(record->n_rfields * sizeof(ValPropPair*));
+			pair->record_vec.size = record->n_rfields;
+			for (int i = 0; i < record->n_rfields; i++) {
+				pair->record_vec.array[i] = makeValPropPair(&(ValPropPair){record->rfields[i]->vlabel, 0, record->rfields[i]->vtype});
+			}
+		} else {
+			char msg[128];
+			sprintf(msg, "No definition of record with name '%s' was found.", expr->vrlabel);
+			c_error(msg, -1);
+		}
+	}
 
 	push(valstack, pair);
 	push(opstack, expr);
@@ -2354,6 +2461,7 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 		case AST_BOOL:
 		case AST_ARRAY:
 		case AST_IDENT:
+		case AST_FIELD_ACCESS:
 			push(*opstack, expr);
 			interpret_expr(expr->successor, opstack, valstack);
 			break;
