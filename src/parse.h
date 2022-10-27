@@ -1,8 +1,8 @@
 enum {
-	KEYWORD_IF = 1,
-	KEYWORD_WHILE,
-	KEYWORD_FOR,
-	KEYWORD_RETURN,
+       KEYWORD_IF = 1,
+       KEYWORD_WHILE,
+       KEYWORD_FOR,
+       KEYWORD_RETURN,
 };
 
 enum {

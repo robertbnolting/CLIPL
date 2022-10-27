@@ -1,6 +1,6 @@
 #include <stdlib.h>
 #include <stdio.h>
-#include <string.h>
+#include <string.h> 
 #include <strings.h>
 #include <limits.h>
 
@@ -282,8 +282,23 @@ static const char *datatypeToString(int type)
 			return "float";
 		case TYPE_BOOL:
 			return "bool";
+		case TYPE_ARRAY:
+			return "array";
 		default:
 			return NULL;
+	}
+}
+
+static int astToDatatype(int astType)
+{
+	switch (astType)
+	{
+		case AST_INT: return TYPE_INT;
+		case AST_FLOAT: return TYPE_FLOAT;
+		case AST_STRING: return TYPE_STRING;
+		case AST_BOOL: return TYPE_BOOL;
+		case AST_ARRAY: return TYPE_ARRAY;
+		default: return -1;
 	}
 }
 
@@ -331,7 +346,8 @@ static void printNode(Node *n)
 			printf("(FIELD ACCESS: %s.%s) ", n->access_rlabel->name, n->access_field->name);
 			break;
 		case AST_DECLARATION:
-			printf("(%d-DECLARATION: %s) ", n->vtype, n->vlabel);
+			n->v_array_dimensions ? printf("(%d-D %d-ARRAY DECLARATION: %s)", n->v_array_dimensions, n->vtype, n->vlabel)
+				: printf("(%d-DECLARATION: %s) ", n->vtype, n->vlabel);
 			break;
 		case AST_IDX_ARRAY:
 			printf("(%s[] index %d times) ", n->ia_label, n->ndim_index);
@@ -1724,9 +1740,6 @@ static void thread_expression(Node *expr)
 		case AST_ARRAY:
 			last_node->successor = expr;
 			last_node = expr;
-			for (int i = expr->array_size-1; i >= 0; i--) {
-				thread_expression(expr->array_elems[i]);
-			}
 			break;
 		case AST_IDX_ARRAY:
 			for (int i = expr->ndim_index-1; i >= 0; i--) {
@@ -1886,6 +1899,11 @@ typedef struct ValPropPair {
 		char *sval;
 		float fval;
 		int bval;
+		struct {
+			int array_type;
+			int array_dims;
+			int *array_size;
+		};
 		Vector record_vec;
 	};
 } ValPropPair;
@@ -1978,7 +1996,7 @@ static void sym_interpret(Node *cfg)
 #if SYM_OUTPUT
 	for (int i = 0; i < valstack->size; i++) {
 #define current ((ValPropPair *)valstack->start[i])
-		if (current->type != TYPE_RECORD) {
+		if (current->type != TYPE_RECORD && current->type != TYPE_ARRAY) {
 			printf("NAME: %s | STATUS: %s | TYPE: %s | VALUE: ", current->var_name,
 				current->status ? (current->status == 1 ? "Initialized" : "Maybe initialized") 
 				: "Uninitialized", datatypeToString(current->type));
@@ -2001,7 +2019,19 @@ static void sym_interpret(Node *cfg)
 			} else {
 				printf("/\n");
 			}
-		} else {
+		} else if (current->type == TYPE_ARRAY) {
+			printf("NAME: %s | STATUS: %s | TYPE: %d-D %s-array | SIZE: ", current->var_name,
+				current->status ? (current->status == 1 ? "Initialized" : "Maybe initialized") : "Uninitialized",
+				current->array_dims, datatypeToString(current->array_type));
+				for (int j = 0; j < current->array_dims; j++) {
+					if (j == current->array_dims-1) {
+						printf("%d", current->array_size[j]);
+					} else {
+						printf("%dx", current->array_size[j]);
+					}
+				}
+				printf("\n");
+		} else if (current->type == TYPE_RECORD) {
 			printf("NAME: %s | FIELDS:\n", current->var_name);
 			for (int j = 0; j < current->record_vec.size; j++) {
 #define current_field ((ValPropPair *) current->record_vec.array[j])
@@ -2056,6 +2086,41 @@ static ValPropPair *findFieldInPair(ValPropPair *pair, char *field_name)
 	char msg[128];
 	sprintf(msg, "Record %s has no field with name %s.", pair->var_name, field_name);
 	c_error(msg, -1);
+
+}
+
+static void checkArraySize(ValPropPair *pair, Node *array, int depth)
+{
+	if (pair->array_size[depth] == 0) {
+		pair->array_size[depth] = array->array_size;
+	} else {
+		if (pair->array_size[depth] != array->array_size) {
+			char msg[128];
+			sprintf(msg, "Array assignment of size %ld to array %s with set size %d.",
+				array->array_size, pair->var_name, pair->array_size[depth]);
+			c_error(msg, -1);
+		}
+	}
+	if (depth == pair->array_dims-1) {
+		for (int i = 0; i < array->array_size; i++) {
+			if (astToDatatype(array->array_elems[i]->type) != pair->array_type) {
+				char msg[128];
+				sprintf(msg, "Element of type %s in assignment to array of type %s.",
+					datatypeToString(astToDatatype(array->array_elems[i]->type)), datatypeToString(pair->array_type));
+				c_error(msg, -1);
+			}
+		}
+	} else {
+		for (int i = 0; i < array->array_size; i++) {
+			if (array->array_elems[i]->type == AST_ARRAY) {
+				checkArraySize(pair, array->array_elems[i], depth+1);
+			} else {
+				char msg[128];
+				sprintf(msg, "%d-D array assignment to %d-D array %s.", depth+1, pair->array_dims, pair->var_name);
+				c_error(msg, -1);
+			}
+		}
+	}
 }
 
 static void interpret_assignment_expr(Node *expr, Stack *opstack, Stack *valstack)
@@ -2076,8 +2141,7 @@ static void interpret_assignment_expr(Node *expr, Stack *opstack, Stack *valstac
 			pair = searchValueStack(valstack, lhs->name);
 			if (!pair) {
 				char *msg = malloc(128);
-				sprintf(msg, "No variable with name %s found.", lhs->name);
-				c_error(msg, -1);
+				sprintf(msg, "No variable with name %s found.", lhs->name); c_error(msg, -1);
 			}
 		} else {
 			pair = searchValueStack(valstack, lhs->access_rlabel->name);
@@ -2139,6 +2203,10 @@ static void interpret_assignment_expr(Node *expr, Stack *opstack, Stack *valstac
 						break;
 				}
 				break;
+			case AST_ARRAY:
+				checkDataType(pair, TYPE_ARRAY);
+				checkArraySize(pair, rhs, 0);
+				break;
 			default:
 				c_error("Right-hand side of '=' invalid.", -1);
 		}
@@ -2156,7 +2224,15 @@ static void interpret_declaration_expr(Node *expr, Stack *opstack, Stack *valsta
 		c_error(msg, -1);
 	}
 
-	ValPropPair *pair = makeValPropPair(&(ValPropPair){expr->vlabel, 0, expr->vtype});
+	ValPropPair *pair;
+
+	if (expr->v_array_dimensions) {
+		pair = makeValPropPair(&(ValPropPair)
+			{expr->vlabel, 0, TYPE_ARRAY, .array_type=expr->vtype, .array_dims=expr->v_array_dimensions, .array_size=expr->varray_size}
+		);
+	} else {
+		pair = makeValPropPair(&(ValPropPair){expr->vlabel, 0, expr->vtype});
+	}
 
 	if (expr->vtype == TYPE_RECORD) {
 		Node *record;
@@ -2459,8 +2535,8 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 		case AST_STRING:
 		case AST_FLOAT:
 		case AST_BOOL:
-		case AST_ARRAY:
 		case AST_IDENT:
+		case AST_ARRAY:
 		case AST_FIELD_ACCESS:
 			push(*opstack, expr);
 			interpret_expr(expr->successor, opstack, valstack);
