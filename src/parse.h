@@ -69,6 +69,7 @@ typedef struct Node {
 		struct {
 			size_t array_size;
 			struct Node **array_elems;
+			int array_member_type;	// only used in optimizer
 		};
 		// indexed array
 		struct {

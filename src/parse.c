@@ -1901,7 +1901,7 @@ typedef struct ValPropPair {
 		int bval;
 		struct {
 			int array_type;
-			int array_dims;
+			int array_dims;		// -1 -> unoptimized array literal
 			int *array_size;
 		};
 		Vector record_vec;
@@ -2020,17 +2020,20 @@ static void sym_interpret(Node *cfg)
 				printf("/\n");
 			}
 		} else if (current->type == TYPE_ARRAY) {
-			printf("NAME: %s | STATUS: %s | TYPE: %d-D %s-array | SIZE: ", current->var_name,
-				current->status ? (current->status == 1 ? "Initialized" : "Maybe initialized") : "Uninitialized",
-				current->array_dims, datatypeToString(current->array_type));
-				for (int j = 0; j < current->array_dims; j++) {
-					if (j == current->array_dims-1) {
-						printf("%d", current->array_size[j]);
-					} else {
-						printf("%dx", current->array_size[j]);
+			if (current->array_dims > 0) {
+				printf("NAME: %s | STATUS: %s | TYPE: %d-D %s-array | SIZE: ", current->var_name,
+					current->status ? (current->status == 1 ? "Initialized" : "Maybe initialized") : "Uninitialized",
+					current->array_dims, datatypeToString(current->array_type));
+					for (int j = 0; j < current->array_dims; j++) {
+						if (j == current->array_dims-1) {
+							printf("%d", current->array_size[j]);
+						} else {
+							printf("%dx", current->array_size[j]);
+						}
 					}
-				}
 				printf("\n");
+			} else {
+			}
 		} else if (current->type == TYPE_RECORD) {
 			printf("NAME: %s | FIELDS:\n", current->var_name);
 			for (int j = 0; j < current->record_vec.size; j++) {
@@ -2087,6 +2090,27 @@ static ValPropPair *findFieldInPair(ValPropPair *pair, char *field_name)
 	sprintf(msg, "Record %s has no field with name %s.", pair->var_name, field_name);
 	c_error(msg, -1);
 
+}
+
+static int checkArrayMemberTypes(Node *array)
+{
+	int member_type;
+	if (array->array_elems[0]->type == AST_ARRAY) {
+		member_type = checkArrayMemberTypes(array->array_elems[0]);
+		if (!member_type) {
+			return 0;
+		}
+	} else {
+		member_type = array->array_elems[0]->type;
+	}
+	for (int i = 0; i < array->array_size; i++)
+	{
+		if (array->array_elems[i]->type != member_type) {
+			return 0;
+		}
+	}
+
+	return member_type;
 }
 
 static void checkArraySize(ValPropPair *pair, Node *array, int depth)
@@ -2205,7 +2229,13 @@ static void interpret_assignment_expr(Node *expr, Stack *opstack, Stack *valstac
 				break;
 			case AST_ARRAY:
 				checkDataType(pair, TYPE_ARRAY);
-				checkArraySize(pair, rhs, 0);
+				if (rhs->array_elems != NULL) {
+					checkArraySize(pair, rhs, 0);
+				} else {
+					pair->array_dims = -1;
+					pair->array_type = rhs->array_member_type;
+					pair->array_size[0] = rhs->array_size;
+				}
 				break;
 			default:
 				c_error("Right-hand side of '=' invalid.", -1);
@@ -2500,6 +2530,73 @@ static void interpret_binary_expr(int op, Stack *opstack, Stack *valstack)
 				}
 			}
 		}
+		break;
+		case AST_ARRAY:
+			int member_type = l_operand->array_elems[0]->type;
+			switch (r_operand->type)
+			{
+				case AST_INT:
+				case AST_STRING:
+				case AST_FLOAT:
+				case AST_BOOL:
+					if (member_type != r_operand->type) {
+						char msg[128];
+						sprintf(msg, "Invalid binary operation with operands of type %s-array and %s.",
+							datatypeToString(astToDatatype(member_type)), datatypeToString(astToDatatype(r_operand->type)));
+						c_error(msg, -1);
+					}
+					// array_size is int * because of multi-dimensional arrays -> handle!
+					push(opstack, ast_arraytype(l_operand->array_size + 1, NULL));
+					break;
+				case AST_IDENT:
+				{
+					ValPropPair *pair = searchValueStack(valstack, r_operand->name);
+					if (!pair) {
+						char *msg = malloc(128);
+						sprintf(msg, "No variable with name %s found.", r_operand->name);
+						c_error(msg, -1);
+
+					}
+					switch (pair->type)
+					{
+						case TYPE_INT:
+						case TYPE_STRING:
+						case TYPE_FLOAT:
+						case TYPE_BOOL:
+							if (astToDatatype(member_type) != pair->type) {
+								char msg[128];
+								sprintf(msg, "Invalid binary operation with operands of type %s-array and %s.",
+									datatypeToString(astToDatatype(member_type)), datatypeToString(pair->type));
+								c_error(msg, -1);
+							}
+							push(opstack, ast_arraytype(l_operand->array_size + 1, NULL));
+							break;
+						case TYPE_ARRAY:
+							if (astToDatatype(member_type) != pair->array_type) {
+								char msg[128];
+								sprintf(msg, "Invalid binary operation with operands of type %s-array and %s-array",
+									datatypeToString(astToDatatype(member_type)), datatypeToString(pair->array_type));
+								c_error(msg, -1);
+							}
+							push(opstack, ast_arraytype(l_operand->array_size + pair->array_size[0], NULL));
+							break;
+					}
+				}
+				break;
+				case AST_ARRAY:
+				{
+					int r_member_type = r_operand->array_elems[0]->type;
+					if (member_type != r_member_type) {
+						char msg[128];
+						sprintf(msg, "Invalid binary operation with operands of type %s-array and %s-array",
+							datatypeToString(astToDatatype(member_type)), datatypeToString(astToDatatype(r_member_type)));
+						c_error(msg, -1);
+					}
+					push(opstack, ast_arraytype(l_operand->array_size + r_operand->array_size, NULL));
+				}
+				break;
+			}
+			break;
 	}
 }
 
@@ -2536,11 +2633,21 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 		case AST_FLOAT:
 		case AST_BOOL:
 		case AST_IDENT:
-		case AST_ARRAY:
 		case AST_FIELD_ACCESS:
 			push(*opstack, expr);
 			interpret_expr(expr->successor, opstack, valstack);
 			break;
+		case AST_ARRAY:
+		{
+			int member_type;
+			if (!(member_type = checkArrayMemberTypes(expr))) {
+				c_error("Invalid array expression: all members must be of the same type.", -1);
+			}
+			expr->array_member_type = member_type;
+			push(*opstack, expr);
+			interpret_expr(expr->successor, opstack, valstack);
+			break;
+		}
 		case AST_ADD:
 		case AST_SUB:
 		case AST_MUL:
