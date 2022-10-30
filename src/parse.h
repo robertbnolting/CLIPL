@@ -6,13 +6,13 @@ enum {
 };
 
 enum {
-	TYPE_VOID = 1,
-	TYPE_INT,
+	TYPE_INT = 1,
 	TYPE_FLOAT,
 	TYPE_STRING,
 	TYPE_BOOL,
 	TYPE_ARRAY,
 	TYPE_RECORD,
+	TYPE_VOID = 1,
 };
 
 enum {
@@ -51,12 +51,39 @@ enum {
 	CFG_JOIN_NODE,
 };
 
+typedef struct {
+	void **array;
+	size_t size;
+} Vector;
+
+typedef struct ValPropPair {
+	char *var_name;
+	int status;	// 0 -> Uninitialized, 1 -> Initialized, 2 -> MaybeInitialized -1 -> Value not constant
+	int type;
+	union {
+		int ival;
+		char *sval;
+		float fval;
+		int bval;
+		struct {
+			int array_type;
+			int array_dims;
+			int *array_size;
+		};
+		Vector record_vec;
+	};
+} ValPropPair;
+
 typedef struct Node {
 	int type;
 	struct Node *successor;
 	union {
 		// identifier
-		char *name;
+		struct {
+			char *name;
+			// context checking
+			ValPropPair *ident_valproppair;
+		};
 		// int
 		int ival;
 		// float
@@ -69,7 +96,9 @@ typedef struct Node {
 		struct {
 			size_t array_size;
 			struct Node **array_elems;
-			int array_member_type;	// only used in optimizer
+			// only used in optimizer
+			int array_member_type;
+			int array_dims;
 		};
 		// indexed array
 		struct {
@@ -86,6 +115,8 @@ typedef struct Node {
 		struct {
 			struct Node *left;
 			struct Node *right;
+			// context checking
+			int result_type;
 		};
 		// declaration
 		struct {
@@ -94,6 +125,8 @@ typedef struct Node {
 			char *vrlabel;
 			int v_array_dimensions;
 			int *varray_size;
+			// context checking
+			ValPropPair *decl_valproppair;
 		};
 		// record definition
 		struct {

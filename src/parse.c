@@ -275,15 +275,15 @@ static const char *datatypeToString(int type)
 	switch (type)
 	{
 		case TYPE_INT:
-			return "int";
+			return "\x1b[95mint\x1b[0m";
 		case TYPE_STRING:
-			return "string";
+			return "\x1b[95mstring\x1b[0m";
 		case TYPE_FLOAT:
-			return "float";
+			return "\x1b[95mfloat\x1b[0m";
 		case TYPE_BOOL:
-			return "bool";
+			return "\x1b[95mbool\x1b[0m";
 		case TYPE_ARRAY:
-			return "array";
+			return "\x1b[95marray\x1b[0m";
 		default:
 			return NULL;
 	}
@@ -1885,29 +1885,6 @@ Stack *init_stack(size_t n_alloc)
 	return tmp;
 }
 
-typedef struct {
-	void **array;
-	size_t size;
-} Vector;
-
-typedef struct ValPropPair {
-	char *var_name;
-	int status;	// 0 -> Uninitialized, 1 -> Initialized, 2 -> MaybeInitialized
-	int type;
-	union {
-		int ival;
-		char *sval;
-		float fval;
-		int bval;
-		struct {
-			int array_type;
-			int array_dims;		// -1 -> unoptimized array literal
-			int *array_size;
-		};
-		Vector record_vec;
-	};
-} ValPropPair;
-
 static ValPropPair *makeValPropPair(ValPropPair *tmp)
 {
 	ValPropPair *r = malloc(sizeof(ValPropPair));
@@ -1976,6 +1953,8 @@ static Stack *mergeValueStacks(Stack *stack1, Stack *stack2, Stack *oldstack)
 					push(ret_stack, stack1Element);
 				} else if (!old_pair->status && stack1Element->status && stack2Element->status) {
 					push(ret_stack, stack1Element);
+				} else if (old_pair->status) {
+					push(ret_stack, stack1Element);
 				}
 			} else {
 				push(ret_stack, stack1Element);
@@ -1998,9 +1977,9 @@ static void sym_interpret(Node *cfg)
 #define current ((ValPropPair *)valstack->start[i])
 		if (current->type != TYPE_RECORD && current->type != TYPE_ARRAY) {
 			printf("NAME: %s | STATUS: %s | TYPE: %s | VALUE: ", current->var_name,
-				current->status ? (current->status == 1 ? "Initialized" : "Maybe initialized") 
+				current->status ? ( (current->status == 1 || current->status == -1) ? "Initialized" : "Maybe initialized") 
 				: "Uninitialized", datatypeToString(current->type));
-			if (current->status) {
+			if (current->status && current->status > 0) {
 				switch (current->type)
 				{
 					case TYPE_INT:
@@ -2016,24 +1995,23 @@ static void sym_interpret(Node *cfg)
 						printf("%s\n", current->bval ? "true" : "false");
 						break;
 				}
+			} else if (current->status < 0) {
+				printf("Value unknown.\n");
 			} else {
 				printf("/\n");
 			}
 		} else if (current->type == TYPE_ARRAY) {
-			if (current->array_dims > 0) {
-				printf("NAME: %s | STATUS: %s | TYPE: %d-D %s-array | SIZE: ", current->var_name,
-					current->status ? (current->status == 1 ? "Initialized" : "Maybe initialized") : "Uninitialized",
-					current->array_dims, datatypeToString(current->array_type));
-					for (int j = 0; j < current->array_dims; j++) {
-						if (j == current->array_dims-1) {
-							printf("%d", current->array_size[j]);
-						} else {
-							printf("%dx", current->array_size[j]);
-						}
+			printf("NAME: %s | STATUS: %s | TYPE: %d-D %s-array | SIZE: ", current->var_name,
+				current->status ? ( (current->status == 1 || current->status == -1) ? "Initialized" : "Maybe initialized") : "Uninitialized",
+				current->array_dims, datatypeToString(current->array_type));
+				for (int j = 0; j < current->array_dims; j++) {
+					if (j == current->array_dims-1) {
+						printf("%d", current->array_size[j]);
+					} else {
+						printf("%dx", current->array_size[j]);
 					}
-				printf("\n");
-			} else {
-			}
+				}
+			printf("\n");
 		} else if (current->type == TYPE_RECORD) {
 			printf("NAME: %s | FIELDS:\n", current->var_name);
 			for (int j = 0; j < current->record_vec.size; j++) {
@@ -2073,7 +2051,7 @@ static void checkDataType(ValPropPair *pair, int type)
 {
 	if (pair->type != type) {
 		char *msg = malloc(128);
-		sprintf(msg, "Assignment of type '%s' to variable %s of type '%s'.", datatypeToString(type), pair->var_name, datatypeToString(pair->type));
+		sprintf(msg, "Assignment of type %s to variable %s of type %s.", datatypeToString(type), pair->var_name, datatypeToString(pair->type));
 		c_error(msg, -1);
 	}
 }
@@ -2097,16 +2075,20 @@ static int checkArrayMemberTypes(Node *array)
 	int member_type;
 	if (array->array_elems[0]->type == AST_ARRAY) {
 		member_type = checkArrayMemberTypes(array->array_elems[0]);
-		if (!member_type) {
-			return 0;
+		for (int i = 1; i < array->array_size; i++) {
+			if (array->array_elems[i]->type != AST_ARRAY) {
+				return 0;
+			}
+			if (checkArrayMemberTypes(array->array_elems[i]) != member_type) {
+				return 0;
+			}
 		}
 	} else {
 		member_type = array->array_elems[0]->type;
-	}
-	for (int i = 0; i < array->array_size; i++)
-	{
-		if (array->array_elems[i]->type != member_type) {
-			return 0;
+		for (int i = 0; i < array->array_size; i++) {
+			if (array->array_elems[i]->type != member_type) {
+				return 0;
+			}
 		}
 	}
 
@@ -2125,16 +2107,8 @@ static void checkArraySize(ValPropPair *pair, Node *array, int depth)
 			c_error(msg, -1);
 		}
 	}
-	if (depth == pair->array_dims-1) {
-		for (int i = 0; i < array->array_size; i++) {
-			if (astToDatatype(array->array_elems[i]->type) != pair->array_type) {
-				char msg[128];
-				sprintf(msg, "Element of type %s in assignment to array of type %s.",
-					datatypeToString(astToDatatype(array->array_elems[i]->type)), datatypeToString(pair->array_type));
-				c_error(msg, -1);
-			}
-		}
-	} else {
+
+	if (depth != pair->array_dims-1) {
 		for (int i = 0; i < array->array_size; i++) {
 			if (array->array_elems[i]->type == AST_ARRAY) {
 				checkArraySize(pair, array->array_elems[i], depth+1);
@@ -2155,18 +2129,9 @@ static void interpret_assignment_expr(Node *expr, Stack *opstack, Stack *valstac
 	if (lhs->type == AST_DECLARATION || lhs->type == AST_IDENT || lhs->type == AST_FIELD_ACCESS) {
 		ValPropPair *pair;
 		if (lhs->type == AST_DECLARATION) {
-			pair = searchValueStack(valstack, lhs->vlabel);
-			if (!pair) {
-				char *msg = malloc(128);
-				sprintf(msg, "No variable with name %s found.", lhs->vlabel);
-				c_error(msg, -1);
-			}
+			pair = lhs->decl_valproppair;
 		} else if (lhs->type == AST_IDENT) {
-			pair = searchValueStack(valstack, lhs->name);
-			if (!pair) {
-				char *msg = malloc(128);
-				sprintf(msg, "No variable with name %s found.", lhs->name); c_error(msg, -1);
-			}
+			pair = lhs->ident_valproppair;
 		} else {
 			pair = searchValueStack(valstack, lhs->access_rlabel->name);
 			if (!pair) {
@@ -2182,21 +2147,26 @@ static void interpret_assignment_expr(Node *expr, Stack *opstack, Stack *valstac
 			case AST_INT:
 				checkDataType(pair, TYPE_INT);
 				pair->ival = rhs->ival;
+				pair->status = 1;
 				break;
 			case AST_STRING:
 				checkDataType(pair, TYPE_STRING);
 				pair->sval = rhs->sval;
+				pair->status = 1;
 				break;
 			case AST_FLOAT:
 				checkDataType(pair, TYPE_FLOAT);
 				pair->fval = rhs->fval;
+				pair->status = 1;
 				break;
 			case AST_BOOL:
 				checkDataType(pair, TYPE_BOOL);
 				pair->bval = rhs->bval;
+				pair->status = 1;
 				break;
 			case AST_IDENT:
-				ValPropPair *ident_pair = searchValueStack(valstack, rhs->name);
+				// ValPropPair *ident_pair = searchValueStack(valstack, rhs->name);
+				ValPropPair *ident_pair = rhs->ident_valproppair;
 				if (!ident_pair) {
 					char *msg = malloc(128);
 					sprintf(msg, "No variable with name %s found.", rhs->name);
@@ -2206,41 +2176,91 @@ static void interpret_assignment_expr(Node *expr, Stack *opstack, Stack *valstac
 					char *msg = malloc(128);
 					sprintf(msg, "Assignment to variable %s invalid: %s has not been initialized.", rhs->name, rhs->name);
 					c_error(msg, -1);
+				} else if (ident_pair->status == 2) {
+					char msg[128];
+					sprintf(msg, "Variable %s may not be initialized.", ident_pair->var_name);
+					c_warning(msg, -1);
 				}
-				switch (ident_pair->type)
-				{
-					case TYPE_INT:
-						checkDataType(pair, TYPE_INT);
-						pair->ival = ident_pair->ival;
-						break;
-					case TYPE_STRING:
-						checkDataType(pair, TYPE_STRING);
-						pair->sval = ident_pair->sval;
-						break;
-					case TYPE_FLOAT:
-						checkDataType(pair, TYPE_FLOAT);
-						pair->fval = ident_pair->fval;
-						break;
-					case TYPE_BOOL:
-						checkDataType(pair, TYPE_BOOL);
-						pair->bval = ident_pair->bval;
-						break;
+				if (ident_pair->status == -1) {
+					pair->status = -1;
+				} else {
+					switch (ident_pair->type)
+					{
+						case TYPE_INT:
+							checkDataType(pair, TYPE_INT);
+							pair->ival = ident_pair->ival;
+							pair->status = 1;
+							break;
+						case TYPE_STRING:
+							checkDataType(pair, TYPE_STRING);
+							pair->sval = ident_pair->sval;
+							pair->status = 1;
+							break;
+						case TYPE_FLOAT:
+							checkDataType(pair, TYPE_FLOAT);
+							pair->fval = ident_pair->fval;
+							pair->status = 1;
+							break;
+						case TYPE_BOOL:
+							checkDataType(pair, TYPE_BOOL);
+							pair->bval = ident_pair->bval;
+							pair->status = 1;
+							break;
+						case TYPE_ARRAY:
+							checkDataType(pair, TYPE_ARRAY);
+							if (ident_pair->array_dims != pair->array_dims) {
+								char msg[128];
+								sprintf(msg, "Invalid assignment of %d-D array to %d-D array.",
+									ident_pair->array_dims, pair->array_dims);
+								c_error(msg, -1);
+							}
+							pair->status = 1;
+							pair->array_size = ident_pair->array_size;
+							break;
+					}
 				}
 				break;
 			case AST_ARRAY:
 				checkDataType(pair, TYPE_ARRAY);
-				if (rhs->array_elems != NULL) {
-					checkArraySize(pair, rhs, 0);
-				} else {
-					pair->array_dims = -1;
-					pair->array_type = rhs->array_member_type;
-					pair->array_size[0] = rhs->array_size;
+				if (pair->array_type != rhs->array_member_type) {
+					char msg[128];
+					sprintf(msg, "Invalid assignment of '%s'-array to '%s'-array.",
+						datatypeToString(rhs->array_member_type), datatypeToString(pair->array_type));
+					c_error(msg, -1);
 				}
+
+				if (pair->array_dims != rhs->array_dims) {
+					char msg[128];
+					sprintf(msg, "Invalid assignment of %d-D array to %d-D array.",
+						rhs->array_dims, pair->array_dims);
+					c_error(msg, -1);
+				}
+
+				checkArraySize(pair, rhs, 0);
+
+				pair->status = 1;
+				break;
+			case AST_ADD:
+			case AST_SUB:
+			case AST_MUL:
+			case AST_DIV:
+			case AST_GT:
+			case AST_LT:
+			case AST_EQ:
+			case AST_NE:
+			case AST_GE:
+			case AST_LE:
+				if (pair->type != rhs->result_type) {
+					char msg[128];
+					sprintf(msg, "Can't assign variable %s with type %s to binary operation with resulting type %s.",
+						pair->var_name, datatypeToString(pair->type), datatypeToString(rhs->result_type));
+					c_error(msg, -1);
+				}
+				pair->status = -1;
 				break;
 			default:
 				c_error("Right-hand side of '=' invalid.", -1);
 		}
-		pair->status = 1;
 	} else {
 		c_error("Left-hand side of '=' invalid.", -1);
 	}
@@ -2281,15 +2301,18 @@ static void interpret_declaration_expr(Node *expr, Stack *opstack, Stack *valsta
 
 	push(valstack, pair);
 	push(opstack, expr);
+
+	expr->decl_valproppair = pair;
 }
 
-static void interpret_binary_expr(int op, Stack *opstack, Stack *valstack)
+static void interpret_binary_expr(Node *operator, Stack *opstack, Stack *valstack)
 {
+#define op (operator->type)
 	Node *r_operand = (Node *) pop(opstack);
 	Node *l_operand = (Node *) pop(opstack);
 
-	if ((r_operand->type != l_operand->type) && !( (r_operand->type == AST_IDENT || r_operand->type == AST_IDX_ARRAY) 
-				|| (l_operand->type == AST_IDENT || l_operand->type == AST_IDX_ARRAY) )) {
+	if ((r_operand->type != l_operand->type) && !( (r_operand->type == AST_IDENT || r_operand->type == AST_ARRAY) 
+				|| (l_operand->type == AST_IDENT || l_operand->type == AST_ARRAY) )) {
 				c_error("Operands of binary operation must be of the same type.", -1);
 	}
 
@@ -2301,12 +2324,8 @@ static void interpret_binary_expr(int op, Stack *opstack, Stack *valstack)
 			int l = l_operand->ival;
 			int r;
 			if (r_operand->type != AST_INT) {
-				ValPropPair *ident_pair = searchValueStack(valstack, r_operand->name);
-				if (!ident_pair) {
-					char *msg = malloc(128);
-					sprintf(msg, "No variable with name %s found.", r_operand->name);
-					c_error(msg, -1);
-				}
+				ValPropPair *ident_pair = r_operand->ident_valproppair;
+
 				if (ident_pair->type != TYPE_INT) {
 					c_error("Operands of binary operation must be of the same type.", -1);
 				}
@@ -2356,15 +2375,9 @@ static void interpret_binary_expr(int op, Stack *opstack, Stack *valstack)
 		break;
 		case AST_STRING:
 		{
-			char *l = l_operand->sval;
-			char *r;
 			if (r_operand->type != AST_STRING) {
-				ValPropPair *ident_pair = searchValueStack(valstack, r_operand->name);
-				if (!ident_pair) {
-					char *msg = malloc(128);
-					sprintf(msg, "No variable with name %s found.", r_operand->name);
-					c_error(msg, -1);
-				}
+				ValPropPair *ident_pair = r_operand->ident_valproppair;
+
 				if (ident_pair->type != TYPE_STRING) {
 					c_error("Operands of binary operation must be of the same type.", -1);
 				}
@@ -2374,36 +2387,23 @@ static void interpret_binary_expr(int op, Stack *opstack, Stack *valstack)
 				} else if (ident_pair->status == 2) {
 					c_warning("Right operand of binary operation may not be initialized.", -1);
 				}
-
-				r = ident_pair->sval;
-			} else {
-				r = r_operand->sval;
 			}
 			switch (op)
 			{
 				case AST_ADD:
-					char *comp_string = malloc(strlen(l) + strlen(r) + 1);
-					strcpy(comp_string, l);
-					push(opstack, ast_stringtype(strcat(comp_string, r)));
-					break;
 				case AST_EQ:
-					push(opstack, ast_booltype(!strcmp(l, r)));
+					operator->result_type = TYPE_STRING;
+					push(opstack, operator);
 					break;
 				default:
-					c_error("Illegal operation on value with type 'string'.", -1);
+					c_error("Illegal operation on value with type string.", -1);
 					break;
 			}
 		}
 		break;
 		case AST_IDENT:
 		{
-			ValPropPair *l_op_pair = searchValueStack(valstack, l_operand->name);
-
-			if (!l_op_pair) {
-					char *msg = malloc(128);
-					sprintf(msg, "No variable with name %s found.", l_operand->name);
-					c_error(msg, -1);
-			}
+			ValPropPair *l_op_pair = l_operand->ident_valproppair;
 
 			if (l_op_pair->status == 0) {
 				c_error("Left operand of binary operation not initialized.", -1);
@@ -2423,12 +2423,8 @@ static void interpret_binary_expr(int op, Stack *opstack, Stack *valstack)
 							r = r_operand->ival;
 							break;
 						case AST_IDENT:
-							ValPropPair *r_op_pair = searchValueStack(valstack, r_operand->name);
-							if (!l_op_pair) {
-								char *msg = malloc(128);
-								sprintf(msg, "No variable with name %s found.", r_operand->name);
-								c_error(msg, -1);
-							}
+							ValPropPair *r_op_pair = r_operand->ident_valproppair;
+
 							if (r_op_pair->type != TYPE_INT) {
 								c_error("Operands of binary operation must be of the same type.", -1);
 							}
@@ -2483,20 +2479,12 @@ static void interpret_binary_expr(int op, Stack *opstack, Stack *valstack)
 				break;
 				case TYPE_STRING:
 				{
-					char *l = l_op_pair->sval;
-					char *r;
 					switch (r_operand->type)
 					{
 						case AST_STRING:
-							r = r_operand->sval;
 							break;
 						case AST_IDENT:
-							ValPropPair *r_op_pair = searchValueStack(valstack, r_operand->name);
-							if (!l_op_pair) {
-								char *msg = malloc(128);
-								sprintf(msg, "No variable with name %s found.", r_operand->name);
-								c_error(msg, -1);
-							}
+							ValPropPair *r_op_pair = r_operand->ident_valproppair;
 
 							if (r_op_pair->type != TYPE_STRING) {
 								c_error("Operands of binary operation must be of the same type.", -1);
@@ -2508,7 +2496,6 @@ static void interpret_binary_expr(int op, Stack *opstack, Stack *valstack)
 								c_warning("Right operand of binary operation may not be initialized.", -1);
 							}
 
-							r = r_op_pair->sval;
 							break;
 						default:
 							c_error("Operands of binary operation must be of the same type.", -1);
@@ -2516,94 +2503,168 @@ static void interpret_binary_expr(int op, Stack *opstack, Stack *valstack)
 					switch (op)
 					{
 						case AST_ADD:
-							char *comp_string = malloc(strlen(l) + strlen(r) + 1);
-							strcpy(comp_string, l);
-							push(opstack, ast_stringtype(strcat(comp_string, r)));
-							break;
 						case AST_EQ:
-							push(opstack, ast_booltype(!strcmp(l, r)));
+							operator->result_type = TYPE_STRING;
+							push(opstack, operator);
 							break;
 						default:
-							c_error("Illegal operation on value with type 'string'.", -1);
+							c_error("Illegal operation on value with type \x1b[95mstring\x1b[0m.", -1);
 							break;
 					}
 				}
+				break;
+				case TYPE_ARRAY:
+					switch (r_operand->type)
+					{
+						case AST_INT:
+						case AST_STRING:
+						case AST_FLOAT:
+						case AST_BOOL:
+							if (l_op_pair->array_type != r_operand->type) {
+								char msg[128];
+								sprintf(msg, "Invalid binary operation with operands of type %s-array and %s.",
+									datatypeToString(l_operand->array_member_type), datatypeToString(r_operand->type));
+								c_error(msg, -1);
+							}
+							break;
+						case AST_IDENT:
+						{
+							ValPropPair *r_op_pair = r_operand->ident_valproppair;
+
+							switch (r_op_pair->type)
+							{
+								case TYPE_INT:
+								case TYPE_STRING:
+								case TYPE_FLOAT:
+								case TYPE_BOOL:
+									if (l_op_pair->array_type != r_op_pair->type) {
+										char msg[128];
+										sprintf(msg, "Invalid binary operation with operands of type %s-array and %s.",
+											datatypeToString(l_operand->array_member_type), datatypeToString(r_operand->type));
+										c_error(msg, -1);
+									}
+									break;
+								case TYPE_ARRAY:
+									if (l_op_pair->array_type != r_op_pair->array_type) {
+										char msg[128];
+										sprintf(msg, "Invalid binary operation with operands of type %s-array and %s-array.",
+											datatypeToString(l_op_pair->array_type), datatypeToString(r_op_pair->array_type));
+										c_error(msg, -1);
+									}
+									if (l_op_pair->array_dims != r_op_pair->array_dims) {
+										char msg[128];
+										sprintf(msg, "Invalid binary operation: Operands of %d-D array and %d-D array.",
+											l_op_pair->array_dims, r_op_pair->array_dims);
+										c_error(msg, -1);
+									}
+									break;
+							}
+						}
+						break;
+					}
+					operator->result_type = TYPE_ARRAY;
+					push(opstack, operator);
 			}
-		}
 		break;
+		}
 		case AST_ARRAY:
-			int member_type = l_operand->array_elems[0]->type;
+		{
 			switch (r_operand->type)
 			{
 				case AST_INT:
+					if (!( (op == AST_ADD) || (op == AST_MUL) )) {
+						c_error("Invalid binary operation on operands with type array and \x1b[95mint\x1b[0m.", -1);
+					}
 				case AST_STRING:
 				case AST_FLOAT:
 				case AST_BOOL:
-					if (member_type != r_operand->type) {
+					if (op != AST_ADD) {
 						char msg[128];
-						sprintf(msg, "Invalid binary operation with operands of type %s-array and %s.",
-							datatypeToString(astToDatatype(member_type)), datatypeToString(astToDatatype(r_operand->type)));
+						sprintf(msg, "Invalid binary operation on operands with type array and %s.", datatypeToString(r_operand->type));
 						c_error(msg, -1);
 					}
-					// array_size is int * because of multi-dimensional arrays -> handle!
-					push(opstack, ast_arraytype(l_operand->array_size + 1, NULL));
+					if (l_operand->array_member_type != r_operand->type) {
+						char msg[128];
+						sprintf(msg, "Invalid binary operation with operands of type %s-array and %s.",
+							datatypeToString(l_operand->array_member_type), datatypeToString(r_operand->type));
+						c_error(msg, -1);
+					}
 					break;
 				case AST_IDENT:
 				{
-					ValPropPair *pair = searchValueStack(valstack, r_operand->name);
-					if (!pair) {
-						char *msg = malloc(128);
-						sprintf(msg, "No variable with name %s found.", r_operand->name);
-						c_error(msg, -1);
+					ValPropPair *pair = r_operand->ident_valproppair;
 
-					}
 					switch (pair->type)
 					{
 						case TYPE_INT:
+							if (!( (op == AST_ADD) || (op == AST_MUL) )) {
+								c_error("Invalid binary operation on operands with type array and \x1b[95mint\x1b[0m.", -1);
+							}
 						case TYPE_STRING:
 						case TYPE_FLOAT:
 						case TYPE_BOOL:
-							if (astToDatatype(member_type) != pair->type) {
+							if (op != AST_ADD) {
 								char msg[128];
-								sprintf(msg, "Invalid binary operation with operands of type %s-array and %s.",
-									datatypeToString(astToDatatype(member_type)), datatypeToString(pair->type));
+								sprintf(msg, "Invalid binary operation on operands with type array and %s.", datatypeToString(r_operand->type));
 								c_error(msg, -1);
 							}
-							push(opstack, ast_arraytype(l_operand->array_size + 1, NULL));
+							if (l_operand->array_member_type != pair->type) {
+								char msg[128];
+								sprintf(msg, "Invalid binary operation: Operands of type %s-array and %s.",
+									datatypeToString(l_operand->array_member_type), datatypeToString(pair->type));
+								c_error(msg, -1);
+							}
 							break;
 						case TYPE_ARRAY:
-							if (astToDatatype(member_type) != pair->array_type) {
+							if (op != AST_ADD) {
+								c_error("Invalid binary operation on operand of type array and array.", -1);
+							}
+							if (l_operand->array_member_type != pair->array_type) {
 								char msg[128];
-								sprintf(msg, "Invalid binary operation with operands of type %s-array and %s-array",
-									datatypeToString(astToDatatype(member_type)), datatypeToString(pair->array_type));
+								sprintf(msg, "Invalid binary operation: Operands of type %s-array and %s-array.",
+									datatypeToString(l_operand->array_member_type), datatypeToString(pair->array_type));
 								c_error(msg, -1);
 							}
-							push(opstack, ast_arraytype(l_operand->array_size + pair->array_size[0], NULL));
+							if (l_operand->array_dims != pair->array_dims) {
+								char msg[128];
+								sprintf(msg, "Invalid binary operation: Operands of %d-D array and %d-D array.",
+									l_operand->array_dims, pair->array_dims);
+								c_error(msg, -1);
+							}
 							break;
 					}
 				}
 				break;
 				case AST_ARRAY:
 				{
-					int r_member_type = r_operand->array_elems[0]->type;
-					if (member_type != r_member_type) {
+					if (op != AST_ADD) {
+						c_error("Invalid binary operation on operand of type array and array.", -1);
+					}
+					if (l_operand->array_member_type != r_operand->array_member_type) {
 						char msg[128];
-						sprintf(msg, "Invalid binary operation with operands of type %s-array and %s-array",
-							datatypeToString(astToDatatype(member_type)), datatypeToString(astToDatatype(r_member_type)));
+						sprintf(msg, "Invalid binary operation: Operands of type %s-array and %s-array.",
+							datatypeToString(l_operand->array_member_type), datatypeToString(r_operand->array_member_type));
 						c_error(msg, -1);
 					}
-					push(opstack, ast_arraytype(l_operand->array_size + r_operand->array_size, NULL));
+					if (l_operand->array_dims != r_operand->array_dims) {
+						char msg[128];
+						sprintf(msg, "Invalid binary operation: Operands of %d-D array and %d-D array.",
+							l_operand->array_dims, r_operand->array_dims);
+						c_error(msg, -1);
+					}
 				}
 				break;
 			}
-			break;
+			operator->result_type = TYPE_ARRAY;
+			push(opstack, operator);
+		}
+		break;
 	}
 }
 
 static void interpret_if_stmt(Node *stmt, Stack *opstack, Stack *valstack)
 {
 	Node *condition_outcome = (Node *) pop(opstack);
-
 	int outcome;
 
 	if (condition_outcome->type == AST_INT) {
@@ -2628,11 +2689,20 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 	}
 	switch (expr->type)
 	{
+		case AST_IDENT:
+		{
+			ValPropPair *pair = searchValueStack(*valstack, expr->name);
+			if (!pair) {
+				char *msg = malloc(128);
+				sprintf(msg, "No variable with name %s found.", expr->name);
+				c_error(msg, -1);
+			}
+			expr->ident_valproppair = pair;
+		}
 		case AST_INT:
 		case AST_STRING:
 		case AST_FLOAT:
 		case AST_BOOL:
-		case AST_IDENT:
 		case AST_FIELD_ACCESS:
 			push(*opstack, expr);
 			interpret_expr(expr->successor, opstack, valstack);
@@ -2643,7 +2713,16 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 			if (!(member_type = checkArrayMemberTypes(expr))) {
 				c_error("Invalid array expression: all members must be of the same type.", -1);
 			}
+
+			Node *elem = expr->array_elems[0];
+			int dims = 1;
+			while (elem->type == AST_ARRAY) {
+				elem = elem->array_elems[0];
+				dims++;
+			}
+	
 			expr->array_member_type = member_type;
+			expr->array_dims = dims;
 			push(*opstack, expr);
 			interpret_expr(expr->successor, opstack, valstack);
 			break;
@@ -2658,7 +2737,7 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 		case AST_NE:
 		case AST_GE:
 		case AST_LE:
-			interpret_binary_expr(expr->type, *opstack, *valstack);
+			interpret_binary_expr(expr, *opstack, *valstack);
 			interpret_expr(expr->successor, opstack, valstack);
 			break;
 		case AST_DECLARATION:
@@ -2695,7 +2774,7 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 					free(valstack_else);
 				}
 			} else {
-				if (expr->else_reachable > 0) {
+				if (!expr->else_reachable) {
 					*valstack = mergeValueStacks(valstack_then, NULL, *valstack);
 				}
 				free(valstack_then);
