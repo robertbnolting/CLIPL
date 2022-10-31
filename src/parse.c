@@ -876,9 +876,9 @@ static Node *ast_record_def(char *label, size_t n_fields, Node **fields)
 	return makeNode(&(Node){AST_RECORD_DEF, .rlabel=label, .n_rfields=n_fields, .rfields=fields});
 }
  
-static Node *ast_funcdef(char *label, int ret_type, int array_dims, size_t params_n, size_t stmts_n, Node **params, Node **body)
+static Node *ast_funcdef(char *label, int ret_type, int array_dims, size_t params_n, size_t stmts_n, Node **params, Node **body, int isEntry)
 {
-	return makeNode(&(Node){AST_FUNCTION_DEF, .flabel=label, .return_type=ret_type, .ret_array_dims=array_dims, .n_params=params_n, .n_stmts=stmts_n, .fnparams=params, .fnbody=body});
+	return makeNode(&(Node){AST_FUNCTION_DEF, .flabel=label, .return_type=ret_type, .ret_array_dims=array_dims, .n_params=params_n, .n_stmts=stmts_n, .fnparams=params, .fnbody=body, .is_fn_entrypoint=isEntry});
 }
 
 static Node *ast_funccall(char *label, size_t nargs, Node **args)
@@ -949,11 +949,24 @@ static void expect(int tclass, const char *msg)
 
 static Node *read_global_expr()
 {
+	static int entrypoint_defined = 0;
+
 	Token_type *tok = get();
 	if (!strcmp(tok->repr, "fn")) {
-		return read_fn_def();
+		return read_fn_def(0);
 	} else if (!strcmp(tok->repr, "record")) {
 		return read_record_def();
+	} else if (!strcmp(tok->repr, "entry")) {
+		if (entrypoint_defined) {
+			c_error("Function entry point already defined.", tok->line);
+		}
+		tok = get();
+		if (!strcmp(tok->repr, "fn")) {
+			entrypoint_defined = 1;
+			return read_fn_def(1);
+		} else {
+			c_error("Specifier 'entry' must be followed by function definition.", tok->line);
+		}
 	} else {
 		if (tok->class != EoF) {
 			c_error("Unexpected global expression.", tok->line);
@@ -994,7 +1007,7 @@ static Node *read_record_def()
 	}
 }
 
-static Node *read_fn_def()
+static Node *read_fn_def(int isEntry)
 {
 	Token_type *tok = get();
 	if (tok->class == IDENTIFIER) {
@@ -1031,7 +1044,7 @@ static Node *read_fn_def()
 
 		expect('}', "");
 
-		return ast_funcdef(flabel, ret_type, array_dims, params_n, stmts_n, params, body);
+		return ast_funcdef(flabel, ret_type, array_dims, params_n, stmts_n, params, body, isEntry);
 	}
 
 	return NULL;

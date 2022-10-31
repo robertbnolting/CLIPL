@@ -146,6 +146,7 @@ typedef struct Node {
 			size_t n_stmts;
 			struct Node **fnparams;
 			struct Node **fnbody;
+			int is_fn_entrypoint;
 		};
 		// function call
 		struct {

@@ -4,8 +4,10 @@
 #include <stdarg.h>
 
 #include "parse.h"
+#include "error.h"
 
 static FILE *outputfp;
+static int entrypoint_defined;
 
 static void emit_func_prologue();
 static void emit_block();
@@ -47,9 +49,14 @@ static void emitf(char *fmt, ...) {
 
 void gen(Node **funcs, size_t n_funcs)
 {
+	entrypoint_defined = 0;
 	for (int i = 0; i < n_funcs; i++) {
 		emit_func_prologue(funcs[i]);
 		emit_block(funcs[i]->fnbody, funcs[i]->n_stmts);
+	}
+
+	if (!entrypoint_defined) {
+		c_error("No entrypoint was specified. Use keyword 'entry' in front of function to mark it as the entrypoint.", -1);
 	}
 }
 
@@ -65,7 +72,12 @@ void pop(char *reg)
 
 static void emit_func_prologue(Node *func)
 {
-	emit_noindent("section .text");
+	emit_noindent("\nsection .text");
+	if (func->is_fn_entrypoint) {
+		entrypoint_defined = 1;
+		emit_noindent("global _start");
+		emit_noindent("_start:");
+	}
 	emit_noindent("global %s", func->flabel);
 	emit_noindent("%s:", func->flabel);
 	push("rbp");
@@ -93,7 +105,7 @@ static void emit_literal(Node *expr)
 			if (!expr->slabel) {
 				expr->slabel = make_label();
 				emit_noindent("section .data");
-				emit("%s db \"%s\"", expr->slabel, expr->sval);
+				emit("%s db %s", expr->slabel, expr->sval);
 				emit_noindent("section .text");
 			}
 			break;
@@ -120,6 +132,12 @@ static void emit_binop(Node *expr)
 	emit("%s rax, rcx", op);
 }
 
+static void emit_rep()
+{
+	emit("leave");
+	emit("ret");
+}
+
 static void emit_expr(Node *expr)
 {
 	switch (expr->type)
@@ -131,6 +149,9 @@ static void emit_expr(Node *expr)
 		case AST_ARRAY:
 			emit_literal(expr);
 			break;
+		case AST_RETURN:
+			emit_expr(expr->retval);
+			emit_ret();
 		default:
 			emit_binop(expr);
 			break;
