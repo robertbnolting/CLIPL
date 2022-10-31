@@ -4,11 +4,11 @@ CFLAGS  = -g -Wall
 
 default: compile
 
-compile: main.o lex.o parse.o readfile.o error.o
-	$(CC) $(CFLAGS) -o compile main.o lex.o parse.o readfile.o error.o
+compile: main.o lex.o parse.o readfile.o error.o gen.o
+	$(CC) $(CFLAGS) -o compile main.o lex.o parse.o readfile.o error.o gen.o
 	rm *.o
 
-main.o: main.c readfile.h lex.h parse.h error.h
+main.o: main.c readfile.h lex.h parse.h error.h gen.o
 	$(CC) $(CFLAGS) -c main.c
 
 lex.o: lex.c lex.h error.h
@@ -22,3 +22,6 @@ readfile.o: readfile.c readfile.h
 
 error.o: error.c error.h
 	$(CC) $(CFLAGS) -c error.c
+
+gen.o: gen.c gen.h
+	$(CC) $(CFLAGS) -c gen.c

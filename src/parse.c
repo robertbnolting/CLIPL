@@ -8,9 +8,11 @@
 #include "lex.h"
 #include "error.h"
 
+#include "gen.h"
+
 #define AST_OUTPUT 0
 #define CFG_OUTPUT 0
-#define SYM_OUTPUT 1
+#define SYM_OUTPUT 0
 
 static int pos;
 
@@ -70,7 +72,7 @@ static const char *datatypeToString();
 static Node *cfg_aux_node();
 static Node *cfg_join_node();
 
-static Node *thread_ast();
+static Node **thread_ast();
 
 // CFG traversal
 static Node *printCFG();
@@ -125,11 +127,13 @@ void parser_init()
 		}
 	}
 
-	Node *cfg_array = thread_ast();
+	Node **cfg_array = thread_ast();
 
 #if CFG_OUTPUT
-	printCFG(cfg_array);
-	printf("\n");
+	for (int i = 0; i < global_function_count; i++) {
+		printCFG(cfg_array[i]);
+		printf("\n-------------\n");
+	}
 #endif
 
 #if AST_OUTPUT
@@ -141,7 +145,19 @@ void parser_init()
 	free(node_array);
 #endif
 
-	sym_interpret(cfg_array);
+	/*
+	Node *ops;
+	ValPropPair *vals;
+	sym_interpret(cfg_array, &ops, &vals);
+
+	gen(ops, vals); */
+	for (int i = 0; i < global_function_count; i++) {
+		sym_interpret(cfg_array[i]);
+	}
+
+	FILE *fp = fopen("test.s", "w");
+	set_output_file(fp);
+	gen(global_functions, global_function_count);
 }
 
 static Node *printCFG(Node *start)
@@ -1689,22 +1705,20 @@ static Node *cfg_join_node()
 static Node *last_node;
 static void thread_expression();
 
-static Node *thread_ast()
+static Node **thread_ast()
 {
-	Node tmp;
+	Node **function_cfgs = malloc(sizeof(Node*) * global_function_count);
 
-	last_node = &tmp;
 
 	for (int i = 0; i < global_function_count; i++) {
-		if (!strcmp(global_functions[i]->flabel, "main")) {
-			thread_expression(global_functions[i]);
-			last_node->successor = NULL;
-			return tmp.successor;
-		}
+		Node tmp;
+		last_node = &tmp;
+		thread_expression(global_functions[i]);
+		last_node->successor = NULL;
+		function_cfgs[i] = tmp.successor;
 	}
 
-	c_error("No main function defined.");
-	return 0;
+	return function_cfgs;
 }
 
 static void thread_block(Node **block, size_t block_size)
@@ -1712,6 +1726,7 @@ static void thread_block(Node **block, size_t block_size)
 	for (int i = 0; i < block_size; i++) {
 		thread_expression(block[i]);
 		if (block[i]->type == AST_RETURN_STMT) {
+			thread_expression(block[i]);
 			break;	// dead-code elimination
 		}
 	}
@@ -1729,9 +1744,7 @@ static void thread_expression(Node *expr)
 		case AST_IDENT:
 		case AST_INT:
 		case AST_FLOAT:
-		case AST_STRING:
-		case AST_BOOL:
-		case AST_FIELD_ACCESS:
+		case AST_STRING: case AST_BOOL: case AST_FIELD_ACCESS:
 		case AST_RECORD_DEF:
 		case AST_DECLARATION:
 			last_node->successor = expr;
@@ -1806,11 +1819,11 @@ static void thread_expression(Node *expr)
 			}
 			last_node->successor = expr;
 			last_node = expr;
-			thread_expression(func);
 			break;
 		case AST_RETURN_STMT:
 			last_node->successor = expr;
 			last_node = expr;
+
 			if (expr->retval == NULL) {
 				aux = cfg_aux_node();
 				last_node->successor = aux;
@@ -1965,7 +1978,7 @@ static Stack *mergeValueStacks(Stack *stack1, Stack *stack2, Stack *oldstack)
 	return ret_stack;
 }
 
-static void sym_interpret(Node *cfg)
+static void sym_interpret(Node *cfg/*, Node **ops, ValPropPair **vals*/)
 {
 	Stack *opstack = init_stack(512);
 	Stack *valstack = init_stack(512);
@@ -2045,6 +2058,11 @@ static void sym_interpret(Node *cfg)
 #undef current_field
 #undef current
 #endif
+
+	/*
+	*ops = *((Node **) opstack->start);
+	*vals = *((ValPropPair **) valstack->start);
+	*/
 }
 
 static void checkDataType(ValPropPair *pair, int type)
