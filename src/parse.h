@@ -12,7 +12,7 @@ enum {
 	TYPE_BOOL,
 	TYPE_ARRAY,
 	TYPE_RECORD,
-	TYPE_VOID = 1,
+	TYPE_VOID,
 };
 
 enum {
@@ -130,6 +130,8 @@ typedef struct Node {
 			int *varray_size;
 			// context checking
 			ValPropPair *decl_valproppair;
+			// code generation
+			int loff;
 		};
 		// record definition
 		struct {

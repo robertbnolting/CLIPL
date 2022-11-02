@@ -6,6 +6,8 @@
 #include "parse.h"
 #include "error.h"
 
+static char *REGS[] = {"rdi", "rsi", "rdx", "rcx", "r8", "r9"};
+
 static FILE *outputfp;
 static int entrypoint_defined;
 
@@ -70,6 +72,32 @@ void pop(char *reg)
 	emit("pop %s", reg);
 }
 
+// TODO: variable args for syscall parameters
+static void emit_syscall(int code /*,...*/)
+{
+	emit("mov rax, %d", code);
+	emit("mov rdi, 0");
+
+	emit("syscall");
+}
+
+static void push_func_params(Node **params, size_t nparams, int off)
+{
+	int ireg = 0;
+	for (int i = 0; i < nparams; i++) {
+		Node *n = params[i];
+		// int, string, bool, array
+		if (n->vtype == 1 || (n->vtype <= 5 && n->vtype >= 3)) {
+			// TODO: what if regs are full
+			push(REGS[ireg++]);
+			off -= 8;
+		} else {
+			printf("Not implemented.\n");
+		}
+		n->loff = off;
+	}
+}
+
 static void emit_func_prologue(Node *func)
 {
 	emit_noindent("\nsection .text");
@@ -82,6 +110,17 @@ static void emit_func_prologue(Node *func)
 	emit_noindent("%s:", func->flabel);
 	push("rbp");
 	emit("mov rbp, rsp");
+	int off = 0;
+
+	push_func_params(func->fnparams, func->n_params, off);
+	off -= func->n_params;
+
+	// TODO: every function definition node has collection of all local vars
+	// --> their offset is computed here
+
+	if (func->is_fn_entrypoint) {
+		emit_syscall(60);
+	}
 }
 
 static void emit_block(Node **block, size_t sz)
@@ -132,7 +171,7 @@ static void emit_binop(Node *expr)
 	emit("%s rax, rcx", op);
 }
 
-static void emit_rep()
+static void emit_ret()
 {
 	emit("leave");
 	emit("ret");
@@ -149,7 +188,7 @@ static void emit_expr(Node *expr)
 		case AST_ARRAY:
 			emit_literal(expr);
 			break;
-		case AST_RETURN:
+		case AST_RETURN_STMT:
 			emit_expr(expr->retval);
 			emit_ret();
 		default:
