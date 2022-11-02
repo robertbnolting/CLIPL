@@ -3,3 +3,5 @@ a.out
 input*
 example_input
 test*
+*.s
+*.asm
