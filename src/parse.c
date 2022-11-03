@@ -2154,9 +2154,9 @@ static void interpret_assignment_expr(Node *expr, Stack *opstack, Stack *valstac
 	if (lhs->type == AST_DECLARATION || lhs->type == AST_IDENT || lhs->type == AST_FIELD_ACCESS) {
 		ValPropPair *pair;
 		if (lhs->type == AST_DECLARATION) {
-			pair = lhs->decl_valproppair;
+			pair = lhs->lvar_valproppair;
 		} else if (lhs->type == AST_IDENT) {
-			pair = lhs->ident_valproppair;
+			pair = lhs->lvar_valproppair;
 		} else {
 			pair = searchValueStack(valstack, lhs->access_rlabel->name);
 			if (!pair) {
@@ -2191,7 +2191,7 @@ static void interpret_assignment_expr(Node *expr, Stack *opstack, Stack *valstac
 				break;
 			case AST_IDENT:
 				// ValPropPair *ident_pair = searchValueStack(valstack, rhs->name);
-				ValPropPair *ident_pair = rhs->ident_valproppair;
+				ValPropPair *ident_pair = rhs->lvar_valproppair;
 				if (!ident_pair) {
 					char *msg = malloc(128);
 					sprintf(msg, "No variable with name %s found.", rhs->name);
@@ -2327,7 +2327,7 @@ static void interpret_declaration_expr(Node *expr, Stack *opstack, Stack *valsta
 	push(valstack, pair);
 	push(opstack, expr);
 
-	expr->decl_valproppair = pair;
+	expr->lvar_valproppair = pair;
 }
 
 static void interpret_binary_expr(Node *operator, Stack *opstack, Stack *valstack)
@@ -2349,7 +2349,7 @@ static void interpret_binary_expr(Node *operator, Stack *opstack, Stack *valstac
 			int l = l_operand->ival;
 			int r;
 			if (r_operand->type != AST_INT) {
-				ValPropPair *ident_pair = r_operand->ident_valproppair;
+				ValPropPair *ident_pair = r_operand->lvar_valproppair;
 
 				if (ident_pair->type != TYPE_INT) {
 					c_error("Operands of binary operation must be of the same type.", -1);
@@ -2401,7 +2401,7 @@ static void interpret_binary_expr(Node *operator, Stack *opstack, Stack *valstac
 		case AST_STRING:
 		{
 			if (r_operand->type != AST_STRING) {
-				ValPropPair *ident_pair = r_operand->ident_valproppair;
+				ValPropPair *ident_pair = r_operand->lvar_valproppair;
 
 				if (ident_pair->type != TYPE_STRING) {
 					c_error("Operands of binary operation must be of the same type.", -1);
@@ -2428,7 +2428,7 @@ static void interpret_binary_expr(Node *operator, Stack *opstack, Stack *valstac
 		break;
 		case AST_IDENT:
 		{
-			ValPropPair *l_op_pair = l_operand->ident_valproppair;
+			ValPropPair *l_op_pair = l_operand->lvar_valproppair;
 
 			if (l_op_pair->status == 0) {
 				c_error("Left operand of binary operation not initialized.", -1);
@@ -2448,7 +2448,7 @@ static void interpret_binary_expr(Node *operator, Stack *opstack, Stack *valstac
 							r = r_operand->ival;
 							break;
 						case AST_IDENT:
-							ValPropPair *r_op_pair = r_operand->ident_valproppair;
+							ValPropPair *r_op_pair = r_operand->lvar_valproppair;
 
 							if (r_op_pair->type != TYPE_INT) {
 								c_error("Operands of binary operation must be of the same type.", -1);
@@ -2509,7 +2509,7 @@ static void interpret_binary_expr(Node *operator, Stack *opstack, Stack *valstac
 						case AST_STRING:
 							break;
 						case AST_IDENT:
-							ValPropPair *r_op_pair = r_operand->ident_valproppair;
+							ValPropPair *r_op_pair = r_operand->lvar_valproppair;
 
 							if (r_op_pair->type != TYPE_STRING) {
 								c_error("Operands of binary operation must be of the same type.", -1);
@@ -2554,7 +2554,7 @@ static void interpret_binary_expr(Node *operator, Stack *opstack, Stack *valstac
 							break;
 						case AST_IDENT:
 						{
-							ValPropPair *r_op_pair = r_operand->ident_valproppair;
+							ValPropPair *r_op_pair = r_operand->lvar_valproppair;
 
 							switch (r_op_pair->type)
 							{
@@ -2617,7 +2617,7 @@ static void interpret_binary_expr(Node *operator, Stack *opstack, Stack *valstac
 					break;
 				case AST_IDENT:
 				{
-					ValPropPair *pair = r_operand->ident_valproppair;
+					ValPropPair *pair = r_operand->lvar_valproppair;
 
 					switch (pair->type)
 					{
@@ -2722,7 +2722,7 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 				sprintf(msg, "No variable with name %s found.", expr->name);
 				c_error(msg, -1);
 			}
-			expr->ident_valproppair = pair;
+			expr->lvar_valproppair = pair;
 		}
 		case AST_INT:
 		case AST_STRING:

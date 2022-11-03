@@ -78,6 +78,7 @@ typedef struct ValPropPair {
 		};
 		Vector record_vec;
 	};
+	int loff;
 } ValPropPair;
 
 typedef struct Node {
@@ -85,11 +86,7 @@ typedef struct Node {
 	struct Node *successor;
 	union {
 		// identifier
-		struct {
-			char *name;
-			// context checking
-			ValPropPair *ident_valproppair;
-		};
+		char *name;
 		// int
 		int ival;
 		// float
@@ -134,10 +131,6 @@ typedef struct Node {
 			char *vrlabel;
 			int v_array_dimensions;
 			int *varray_size;
-			// context checking
-			ValPropPair *decl_valproppair;
-			// code generation
-			int loff;
 		};
 		// record definition
 		struct {
@@ -194,6 +187,7 @@ typedef struct Node {
 		// return statement
 		struct Node *retval;
 	};
+	ValPropPair *lvar_valproppair;
 } Node;
 
 void parser_init();
