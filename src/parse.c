@@ -1879,12 +1879,6 @@ static void thread_expression(Node *expr)
 	}
 }
 
-typedef struct {
-	void **start;
-	void **top;
-	size_t size;
-} Stack;
-
 static void push(Stack *stack, void *item)
 {
 	stack->top++;

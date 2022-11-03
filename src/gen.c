@@ -98,7 +98,7 @@ static void push_func_params(Node **params, size_t nparams, int off)
 	}
 }
 
-static void emit_func_prologue(Node *func)
+static void emit_func_prologue(Node *func, Stack *localvars)
 {
 	emit_noindent("\nsection .text");
 	if (func->is_fn_entrypoint) {
@@ -117,6 +117,10 @@ static void emit_func_prologue(Node *func)
 
 	// TODO: every function definition node has collection of all local vars
 	// --> their offset is computed here
+
+	for (int i = 0; i < localvars->size; i++) {
+
+	}
 
 	if (func->is_fn_entrypoint) {
 		emit_syscall(60);

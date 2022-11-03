@@ -52,6 +52,12 @@ enum {
 };
 
 typedef struct {
+	void **start;
+	void **top;
+	size_t size;
+} Stack;
+
+typedef struct {
 	void **array;
 	size_t size;
 } Vector;
