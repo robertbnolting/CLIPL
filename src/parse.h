@@ -94,6 +94,7 @@ typedef struct Node {
 		// string
 		struct {
 			char *sval;
+			// used in generation
 			char *slabel;
 		};
 		// bool
@@ -105,6 +106,8 @@ typedef struct Node {
 			// only used in optimizer
 			int array_member_type;
 			int array_dims;
+			// used in generation
+			char *alabel;
 		};
 		// indexed array
 		struct {

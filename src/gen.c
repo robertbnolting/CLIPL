@@ -105,7 +105,7 @@ static void push_func_params(Node **params, size_t nparams)
 
 static void emit_func_prologue(Node *func)
 {
-	emit_noindent("\nsection .text");
+	emit_noindent("section .text");
 	if (func->is_fn_entrypoint) {
 		entrypoint_defined = 1;
 		emit_noindent("global _start");
@@ -139,6 +139,10 @@ static void emit_store(Node *n)
 	{
 		case AST_DECLARATION:
 		case AST_IDENT:
+			if (n->lvar_valproppair->loff == 0) {
+				stack_offset += 8;	// adjust depending on type
+				n->lvar_valproppair->loff = stack_offset;
+			}
 			emit("mov [rbp+%d], rax", n->lvar_valproppair->loff);
 			break;
 	}
@@ -148,6 +152,52 @@ static void emit_assign(Node *n)
 {
 	emit_expr(n->right);	// gets saved in rax
 	emit_store(n->left); 	// rax gets stored at stack offset of left
+}
+
+static char *getArrayElems(Node **elems, size_t size, int type)
+{
+	char *ret = NULL;
+	size_t len = 0;
+
+	for (int i = 0; i < size; i++) {
+		switch (type)
+		{
+		case TYPE_INT:
+		{
+			char num[32];
+			int n;
+			if (i < size-1) {
+				n = sprintf(num, "%d, ", elems[i]->ival);
+			} else {
+				n = sprintf(num, "%d", elems[i]->ival);
+			}
+			len += n;
+			ret = realloc(ret, len);
+			strcat(ret, num);
+			break;
+		}
+		case TYPE_STRING:
+		{
+			char *str = NULL;
+			int n;
+			if (i < size-1) {
+				str = malloc(strlen(elems[i]->sval)) + 5;
+				n = sprintf(str, "%s, ", elems[i]->sval);
+			} else {
+				str = malloc(strlen(elems[i]->sval)) + 3;
+				n = sprintf(str, "%s", elems[i]->sval);
+			}
+
+			len += n;
+			ret = realloc(ret, len);
+			strcat(ret, str);
+
+			break;
+		}
+		}
+	}
+
+	return ret;
 }
 
 static void emit_literal(Node *expr)
@@ -163,10 +213,20 @@ static void emit_literal(Node *expr)
 		case AST_STRING:
 			if (!expr->slabel) {
 				expr->slabel = make_label();
-				emit_noindent("section .data");
+				emit_noindent("\nsection .data");
 				emit("%s db %s", expr->slabel, expr->sval);
-				emit_noindent("section .text");
+				emit_noindent("\nsection .text");
 			}
+			emit("mov rax, %s", expr->slabel);
+			break;
+		case AST_ARRAY:
+			if (!expr->alabel) {
+				expr->alabel = make_label();
+				emit_noindent("\nsection .data");
+				emit("%s db %s", expr->alabel, getArrayElems(expr->array_elems, expr->array_size, expr->array_member_type));
+				emit_noindent("\nsection .text");
+			}
+			emit("mov rax, %s", expr->alabel);
 			break;
 		default:
 			printf("Internal error.");
