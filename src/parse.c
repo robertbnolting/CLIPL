@@ -28,7 +28,7 @@ static void expect();
 
 // AST generation
 static Node *read_global_expr();
-static Node *read_primary_expr();
+static Node *_expr();
 static Node *read_secondary_expr();
 static Node *read_expr();
 
@@ -1112,7 +1112,7 @@ static Node **read_fn_body(size_t *n)
 	return body;
 }
 
-static Node *read_primary_expr()
+static Node *_expr()
 {
 	Token_type *tok = get();
 
@@ -1506,7 +1506,7 @@ static Node *read_declaration_expr(int no_assignment)
 
 static Node *read_field_access()
 {
-	Node *r = read_primary_expr();
+	Node *r = _expr();
 
 	for (;;) {
 		if (curr()->class == '.' && r->type == AST_IDENT) {
@@ -1526,10 +1526,10 @@ static Node *read_multiplicative_expr()
 	for (;;) {
 		if (curr()->class == '*') {
 			next();
-			r = ast_binop('*', r, read_primary_expr());
+			r = ast_binop('*', r, _expr());
 		} else if (curr()->class == '/') {
 			next();
-			r = ast_binop('/', r, read_primary_expr());
+			r = ast_binop('/', r, _expr());
 		} else {
 			return r;
 		}
@@ -1768,9 +1768,11 @@ static void thread_expression(Node *expr)
 			last_node = expr;
 			break;
 		case AST_IDX_ARRAY:
+			/*
 			for (int i = expr->ndim_index-1; i >= 0; i--) {
 				thread_expression(expr->index_values[i]);
 			}
+			*/
 			last_node->successor = expr;
 			last_node = expr;
 			break;
@@ -2095,24 +2097,45 @@ static ValPropPair *findFieldInPair(ValPropPair *pair, char *field_name)
 
 }
 
-static int checkArrayMemberTypes(Node *array)
+static int checkArrayMemberTypes(Node *array, Stack *valstack)
 {
 	int member_type;
 	if (array->array_elems[0]->type == AST_ARRAY) {
-		member_type = checkArrayMemberTypes(array->array_elems[0]);
+		member_type = checkArrayMemberTypes(array->array_elems[0], valstack);
 		for (int i = 1; i < array->array_size; i++) {
 			if (array->array_elems[i]->type != AST_ARRAY) {
 				return 0;
 			}
-			if (checkArrayMemberTypes(array->array_elems[i]) != member_type) {
+			if (checkArrayMemberTypes(array->array_elems[i], valstack) != member_type) {
 				return 0;
 			}
 		}
 	} else {
 		member_type = array->array_elems[0]->type;
-		for (int i = 0; i < array->array_size; i++) {
-			if (array->array_elems[i]->type != member_type) {
-				return 0;
+		if (!member_type) {	// if members are identifiers
+			ValPropPair *pair = searchValueStack(valstack, array->array_elems[0]->name);
+			member_type = pair->type;
+			for (int i = 1; i < array->array_size; i++) {
+				if (array->array_elems[i]->type && (array->array_elems[i]->type != member_type)) {
+					return 0;
+				}
+				if (array->array_elems[i]->type != member_type) {
+					pair = searchValueStack(valstack, array->array_elems[i]->name);
+					if (pair->type != member_type) {
+						return 0;
+					}
+					if (pair->status == 0) {
+						char msg[128];
+						sprintf(msg, "Use of uninitialized variable %s in array initialization.", pair->var_name);
+						c_error(msg, -1);
+					}
+				}
+			}
+		} else {
+			for (int i = 1; i < array->array_size; i++) {
+				if (array->array_elems[i]->type != member_type) {
+					return 0;
+				}
 			}
 		}
 	}
@@ -2146,18 +2169,26 @@ static void checkArraySize(ValPropPair *pair, Node *array, int depth)
 	}
 }
 
+static void assignArrayDimensions(Node *array, int dims)
+{
+	if (dims > 1) {
+		for (int i = 0; i < array->array_size; i++) {
+			assignArrayDimensions(array->array_elems[i], dims-1);
+			array->array_dims = dims;
+		}
+	} else {
+		array->array_dims = dims;
+	}
+}
+
 static void interpret_assignment_expr(Node *expr, Stack *opstack, Stack *valstack)
 {
 	Node *rhs = (Node *) pop(opstack);
 	Node *lhs = (Node *) pop(opstack);
 
-	if (lhs->type == AST_DECLARATION || lhs->type == AST_IDENT || lhs->type == AST_FIELD_ACCESS) {
+	if (lhs->type == AST_DECLARATION || lhs->type == AST_IDENT || lhs->type == AST_FIELD_ACCESS || lhs->type == AST_IDX_ARRAY) {
 		ValPropPair *pair;
-		if (lhs->type == AST_DECLARATION) {
-			pair = lhs->lvar_valproppair;
-		} else if (lhs->type == AST_IDENT) {
-			pair = lhs->lvar_valproppair;
-		} else {
+		if (lhs->type == AST_FIELD_ACCESS){
 			pair = searchValueStack(valstack, lhs->access_rlabel->name);
 			if (!pair) {
 				char msg[128];
@@ -2165,6 +2196,8 @@ static void interpret_assignment_expr(Node *expr, Stack *opstack, Stack *valstac
 				c_error(msg, -1);
 			}
 			pair = findFieldInPair(pair, lhs->access_field->name);
+		} else {
+			pair = lhs->lvar_valproppair;
 		}
 
 		switch (rhs->type)
@@ -2263,8 +2296,14 @@ static void interpret_assignment_expr(Node *expr, Stack *opstack, Stack *valstac
 
 				checkArraySize(pair, rhs, 0);
 
+				pair->array_elems = rhs;
 				pair->status = 1;
 				break;
+			case AST_IDX_ARRAY:
+			{
+				pair->status = 1;
+			}
+			break;
 			case AST_ADD:
 			case AST_SUB:
 			case AST_MUL:
@@ -2324,10 +2363,10 @@ static void interpret_declaration_expr(Node *expr, Stack *opstack, Stack *valsta
 		}
 	}
 
+	expr->lvar_valproppair = pair;
+
 	push(valstack, pair);
 	push(opstack, expr);
-
-	expr->lvar_valproppair = pair;
 }
 
 static void interpret_binary_expr(Node *operator, Stack *opstack, Stack *valstack)
@@ -2340,7 +2379,6 @@ static void interpret_binary_expr(Node *operator, Stack *opstack, Stack *valstac
 				|| (l_operand->type == AST_IDENT || l_operand->type == AST_ARRAY) )) {
 				c_error("Operands of binary operation must be of the same type.", -1);
 	}
-
 
 	switch (l_operand->type)
 	{
@@ -2735,7 +2773,7 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 		case AST_ARRAY:
 		{
 			int member_type;
-			if (!(member_type = checkArrayMemberTypes(expr))) {
+			if (!(member_type = checkArrayMemberTypes(expr, *valstack))) {
 				c_error("Invalid array expression: all members must be of the same type.", -1);
 			}
 
@@ -2745,9 +2783,52 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 				elem = elem->array_elems[0];
 				dims++;
 			}
-	
+
+			assignArrayDimensions(expr, dims);
+
 			expr->array_member_type = member_type;
-			expr->array_dims = dims;
+			push(*opstack, expr);
+			interpret_expr(expr->successor, opstack, valstack);
+			break;
+		}
+		case AST_IDX_ARRAY:
+		{
+			ValPropPair *pair = searchValueStack(*valstack, expr->ia_label);
+			if (!pair) {
+				char *msg = malloc(128);
+				sprintf(msg, "No variable with name %s found.", expr->name);
+				c_error(msg, -1);
+			}
+			if (pair->type != TYPE_ARRAY) {
+				char *msg = malloc(128);
+				sprintf(msg, "Variable %s is not an array.", pair->var_name);
+				c_error(msg, -1);
+			}
+			if (pair->status == 0) {
+				char *msg = malloc(128);
+				sprintf(msg, "Indexing array %s invalid: %s has not been initialized.", pair->var_name, pair->var_name);
+				c_error(msg, -1);
+			} else if (pair->status == 2) {
+				char msg[128];
+				sprintf(msg, "Variable %s may not be initialized.", pair->var_name);
+				c_warning(msg, -1);
+			}
+			if (pair->array_dims < expr->ndim_index) {
+				char *msg = malloc(128);
+				sprintf(msg, "%d-D array %s is being indexed with %d dimensions.", pair->array_dims, pair->var_name, expr->ndim_index);
+				c_error(msg, -1);
+			}
+
+			// TODO: Type checking here
+			// if (pair->array_dims > expr->ndim_index)
+
+			for (int i = 0; i < expr->ndim_index; i++) {
+				if (expr->index_values[i]->ival > pair->array_size[i]-1) {
+					c_error("Array index can't be bigger than array size.", -1);
+				}
+			}
+
+			expr->lvar_valproppair = pair;
 			push(*opstack, expr);
 			interpret_expr(expr->successor, opstack, valstack);
 			break;

@@ -62,6 +62,8 @@ typedef struct {
 	size_t size;
 } Vector;
 
+struct Node;
+
 typedef struct ValPropPair {
 	char *var_name;
 	int status;	// 0 -> Uninitialized, 1 -> Initialized, 2 -> MaybeInitialized, -1 -> Value not constant
@@ -75,6 +77,7 @@ typedef struct ValPropPair {
 			int array_type;
 			int array_dims;
 			int *array_size;
+			struct Node *array_elems;
 		};
 		Vector record_vec;
 	};

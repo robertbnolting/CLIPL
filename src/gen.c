@@ -80,7 +80,7 @@ void pop(char *reg)
 // TODO: variable args for syscall parameters
 static void emit_syscall(int code /*,...*/)
 {
-	emit("mov rax, %d", code);
+	emit_noindent("\n\tmov rax, %d", code);
 	emit("mov rdi, 0");
 
 	emit("syscall");
@@ -154,46 +154,49 @@ static void emit_assign(Node *n)
 	emit_store(n->left); 	// rax gets stored at stack offset of left
 }
 
-static char *getArrayElems(Node **elems, size_t size, int type)
+static char *getArrayElems(Node *expr, int member_type)
 {
 	char *ret = NULL;
 	size_t len = 0;
 
-	for (int i = 0; i < size; i++) {
-		switch (type)
-		{
-		case TYPE_INT:
-		{
-			char num[32];
-			int n;
-			if (i < size-1) {
-				n = sprintf(num, "%d, ", elems[i]->ival);
-			} else {
-				n = sprintf(num, "%d", elems[i]->ival);
-			}
-			len += n;
-			ret = realloc(ret, len);
-			strcat(ret, num);
-			break;
+	if (expr->array_dims > 1) {
+		char *acc = NULL;
+		size_t acc_len = 0;
+		for (int i = 0; i < expr->array_size; i++) {
+			char *sub = getArrayElems(expr->array_elems[i], member_type);
+			acc_len += strlen(sub);
+			acc = realloc(acc, acc_len+1);
+			strcat(acc, sub);
 		}
-		case TYPE_STRING:
-		{
-			char *str = NULL;
-			int n;
-			if (i < size-1) {
-				str = malloc(strlen(elems[i]->sval)) + 5;
-				n = sprintf(str, "%s, ", elems[i]->sval);
-			} else {
-				str = malloc(strlen(elems[i]->sval)) + 3;
-				n = sprintf(str, "%s", elems[i]->sval);
+
+		len += strlen(acc);
+		ret = realloc(ret, len);
+		strcat(ret, acc);
+	} else {
+		for (int i = 0; i < expr->array_size; i++) {
+			switch (member_type)
+			{
+			case TYPE_INT:
+			{
+				char num[32];
+				int n = sprintf(num, "%d, ", expr->array_elems[i]->ival);
+				len += n;
+				ret = realloc(ret, len+1);
+				strcat(ret, num);
 			}
-
-			len += n;
-			ret = realloc(ret, len);
-			strcat(ret, str);
-
 			break;
-		}
+			case TYPE_STRING:
+			{
+				char *str = malloc(strlen(expr->array_elems[i]->sval)) + 5;
+				int n = sprintf(str, "%s, ", expr->array_elems[i]->sval);
+
+				len += n;
+				ret = realloc(ret, len);
+				strcat(ret, str);
+
+			}
+			break;
+			}
 		}
 	}
 
@@ -223,13 +226,32 @@ static void emit_literal(Node *expr)
 			if (!expr->alabel) {
 				expr->alabel = make_label();
 				emit_noindent("\nsection .data");
-				emit("%s db %s", expr->alabel, getArrayElems(expr->array_elems, expr->array_size, expr->array_member_type));
+				emit("%s db %s", expr->alabel, getArrayElems(expr, expr->array_member_type));
 				emit_noindent("\nsection .text");
 			}
 			emit("mov rax, %s", expr->alabel);
 			break;
 		default:
 			printf("Internal error.");
+	}
+}
+
+static void emit_idx_array(Node *n)
+{
+	ValPropPair *ref_array = n->lvar_valproppair;
+	int array_offset = 0;
+	for (int i = 0; i < n->ndim_index; i++) {
+		int sizeacc = 1;
+		for (int j = i+1; j < ref_array->array_dims; j++) {
+			sizeacc *= ref_array->array_size[j];
+		}
+		array_offset += n->index_values[i]->ival * sizeacc;
+	}
+
+	if (ref_array->array_dims == n->ndim_index) {
+		emit("mov rax, [%s+%d]", ref_array->array_elems->alabel, array_offset);
+	} else {
+		emit("mov rax, %s+%d", ref_array->array_elems->alabel, array_offset);
 	}
 }
 
@@ -249,7 +271,7 @@ static void emit_declaration(Node *n)
 	n->lvar_valproppair->loff = stack_offset;
 }
 
-static void emit_binop(Node *expr)
+static void emit_int_arith_binop(Node *expr)
 {
 	char *op = NULL;
 	switch (expr->type)
@@ -265,6 +287,39 @@ static void emit_binop(Node *expr)
 	pop("rax");
 
 	emit("%s rax, rcx", op);
+}
+
+static void emit_comp_binop(Node *expr)
+{
+	emit_expr(expr->left);
+	push("rax");
+	emit_expr(expr->right);
+	emit("mov rcx, rax");
+	pop("rax");
+
+	emit("cmp rax, rcx");
+}
+
+static void emit_binop(Node *expr)
+{
+	switch (expr->type)
+	{
+	case AST_ADD:
+	case AST_SUB:
+		emit_int_arith_binop(expr);
+		break;
+	case AST_GT:
+	case AST_LT:
+	case AST_EQ:
+	case AST_NE:
+	case AST_GE:
+	case AST_LE:
+		emit_comp_binop(expr);
+		break;
+	default:
+		printf("Not implemented.\n");
+		exit(1);
+	}
 }
 
 static void emit_ret()
@@ -286,6 +341,9 @@ static void emit_expr(Node *expr)
 		case AST_BOOL:
 		case AST_ARRAY:
 			emit_literal(expr);
+			break;
+		case AST_IDX_ARRAY:
+			emit_idx_array(expr);
 			break;
 		case AST_RETURN_STMT:
 			emit_expr(expr->retval);
