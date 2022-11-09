@@ -289,6 +289,27 @@ static void emit_int_arith_binop(Node *expr)
 	emit("%s rax, rcx", op);
 }
 
+static void emit_string_arith_binop(Node *expr)
+{
+	emit_expr(expr->left);
+	push("rax");
+	emit_expr(expr->right);
+	emit("mov rcx, rax");
+	emit("pop rax");
+
+	char *label = make_label();
+	emit("mov rsi, 0");
+	emit_noindent("%s:", label);
+	emit("mov dil, [rcx+rsi]");
+	emit("mov rdx, rax");
+	emit("add rdx, %ld", expr->left->slen);
+	emit("add rdx, rsi");
+	emit("mov [rdx], dil");
+	emit("inc rsi");
+	emit("cmp rsi, %d", expr->right->slen);
+	emit("jne %s", label);
+}
+
 static void emit_comp_binop(Node *expr)
 {
 	emit_expr(expr->left);
@@ -306,7 +327,12 @@ static void emit_binop(Node *expr)
 	{
 	case AST_ADD:
 	case AST_SUB:
-		emit_int_arith_binop(expr);
+		if (expr->result_type == TYPE_INT) {
+			emit_int_arith_binop(expr);
+		}
+		if (expr->result_type == TYPE_STRING) {
+			emit_string_arith_binop(expr);
+		}
 		break;
 	case AST_GT:
 	case AST_LT:

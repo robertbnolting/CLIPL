@@ -97,6 +97,7 @@ typedef struct Node {
 		// string
 		struct {
 			char *sval;
+			size_t slen;
 			// used in generation
 			char *slabel;
 		};

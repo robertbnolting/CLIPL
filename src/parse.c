@@ -802,9 +802,9 @@ static Node *ast_identtype(char *n)
 	return makeNode(&(Node){AST_IDENT, .name = n});
 }
 
-static Node *ast_stringtype(char *val)
+static Node *ast_stringtype(char *val, size_t len)
 {
-	return makeNode(&(Node){AST_STRING, .sval = val});
+	return makeNode(&(Node){AST_STRING, .sval = val, .slen = len});
 }
 
 static Node *ast_booltype(int val)
@@ -1650,7 +1650,14 @@ static Node *read_string(Token_type *tok)
 	strcpy(s, tok->repr);
 	s[strlen(tok->repr)] = '\0';
 
-	return ast_stringtype(s);
+	char *a = s;
+	size_t len = 0;
+
+	while (*(a++) != '\0') len++;
+
+	len -= 2;	// to account for ""
+
+	return ast_stringtype(s, len);
 }
 
 static Node *read_bool(Token_type *tok)
