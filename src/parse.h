@@ -128,7 +128,7 @@ typedef struct Node {
 		struct {
 			struct Node *left;
 			struct Node *right;
-			// context checking
+			// context checking and generation
 			int result_type;
 		};
 		// declaration

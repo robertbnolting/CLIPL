@@ -6,7 +6,10 @@
 #include "parse.h"
 #include "error.h"
 
-static char *REGS[] = {"rdi", "rsi", "rdx", "rcx", "r8", "r9"};
+static char *P_REGS[] = {"rdi", "rsi", "rdx", "rcx"};
+static char *S_REGS[] = {"r8", "r9", "r10"};
+
+static int s_regs_count;
 
 static int stack_offset;
 
@@ -58,6 +61,7 @@ static void emitf(char *fmt, ...) {
 void gen(Node **funcs, size_t n_funcs)
 {
 	entrypoint_defined = 0;
+	s_regs_count = 0;
 	for (int i = 0; i < n_funcs; i++) {
 		emit_func_prologue(funcs[i]);
 	}
@@ -94,7 +98,7 @@ static void push_func_params(Node **params, size_t nparams)
 		// int, string, bool, array
 		if (n->vtype == 1 || (n->vtype <= 5 && n->vtype >= 3)) {
 			// TODO: what if regs are full
-			push(REGS[ireg++]);
+			push(P_REGS[ireg++]);
 			stack_offset += 8; 	// adjust depending on type
 		} else {
 			printf("Not implemented.\n");
@@ -221,6 +225,7 @@ static void emit_literal(Node *expr)
 				emit_noindent("\nsection .text");
 			}
 			emit("mov rax, %s", expr->slabel);
+			emit("mov %s, %ld", S_REGS[s_regs_count++], expr->slen);
 			break;
 		case AST_ARRAY:
 			if (!expr->alabel) {
@@ -302,12 +307,16 @@ static void emit_string_arith_binop(Node *expr)
 	emit_noindent("%s:", label);
 	emit("mov dil, [rcx+rsi]");
 	emit("mov rdx, rax");
-	emit("add rdx, %ld", expr->left->slen);
+	emit("add rdx, %s", S_REGS[0]);
 	emit("add rdx, rsi");
 	emit("mov [rdx], dil");
 	emit("inc rsi");
-	emit("cmp rsi, %d", expr->right->slen);
+	emit("cmp rsi, %s", S_REGS[1]);
 	emit("jne %s", label);
+
+	emit("add %s, %s", S_REGS[0], S_REGS[1]);
+
+	s_regs_count = 1;
 }
 
 static void emit_comp_binop(Node *expr)

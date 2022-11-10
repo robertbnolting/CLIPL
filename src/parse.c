@@ -28,7 +28,7 @@ static void expect();
 
 // AST generation
 static Node *read_global_expr();
-static Node *_expr();
+static Node *read_primary_expr();
 static Node *read_secondary_expr();
 static Node *read_expr();
 
@@ -1097,7 +1097,7 @@ static Node **read_fn_body(size_t *n)
 		if (n == NULL) {
 			break;
 		}
-		
+
 		if (!is_stmt_node(n))
 		{
 			expect(';', "Missing ';'.");
@@ -1112,7 +1112,7 @@ static Node **read_fn_body(size_t *n)
 	return body;
 }
 
-static Node *_expr()
+static Node *read_primary_expr()
 {
 	Token_type *tok = get();
 
@@ -1506,7 +1506,7 @@ static Node *read_declaration_expr(int no_assignment)
 
 static Node *read_field_access()
 {
-	Node *r = _expr();
+	Node *r = read_primary_expr();
 
 	for (;;) {
 		if (curr()->class == '.' && r->type == AST_IDENT) {
@@ -1526,10 +1526,10 @@ static Node *read_multiplicative_expr()
 	for (;;) {
 		if (curr()->class == '*') {
 			next();
-			r = ast_binop('*', r, _expr());
+			r = ast_binop('*', r, read_primary_expr());
 		} else if (curr()->class == '/') {
 			next();
-			r = ast_binop('/', r, _expr());
+			r = ast_binop('/', r, read_primary_expr());
 		} else {
 			return r;
 		}
@@ -2376,8 +2376,7 @@ static void interpret_declaration_expr(Node *expr, Stack *opstack, Stack *valsta
 	push(opstack, expr);
 }
 
-static void interpret_binary_expr(Node *operator, Stack *opstack, Stack *valstack)
-{
+static void interpret_binary_expr(Node *operator, Stack *opstack, Stack *valstack) {
 #define op (operator->type)
 	Node *r_operand = (Node *) pop(opstack);
 	Node *l_operand = (Node *) pop(opstack);
@@ -2441,6 +2440,8 @@ static void interpret_binary_expr(Node *operator, Stack *opstack, Stack *valstac
 					push(opstack, ast_booltype(l <= r));
 					break;
 			}
+
+			operator->result_type = TYPE_INT;
 		}
 		break;
 		case AST_STRING:
@@ -2463,7 +2464,7 @@ static void interpret_binary_expr(Node *operator, Stack *opstack, Stack *valstac
 				case AST_ADD:
 				case AST_EQ:
 					operator->result_type = TYPE_STRING;
-					push(opstack, operator);
+					push(opstack, ast_stringtype("", -1));
 					break;
 				default:
 					c_error("Illegal operation on value with type string.", -1);
