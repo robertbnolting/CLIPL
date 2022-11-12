@@ -2546,6 +2546,7 @@ static void interpret_binary_expr(Node *operator, Stack *opstack, Stack *valstac
 							break;
 					}
 
+					operator->result_type = TYPE_INT;
 				}
 				break;
 				case TYPE_STRING:
@@ -2576,7 +2577,7 @@ static void interpret_binary_expr(Node *operator, Stack *opstack, Stack *valstac
 						case AST_ADD:
 						case AST_EQ:
 							operator->result_type = TYPE_STRING;
-							push(opstack, operator);
+							push(opstack, ast_stringtype("", -1));
 							break;
 						default:
 							c_error("Illegal operation on value with type \x1b[95mstring\x1b[0m.", -1);

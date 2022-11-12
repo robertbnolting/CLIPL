@@ -7,7 +7,7 @@
 #include "error.h"
 
 static char *P_REGS[] = {"rdi", "rsi", "rdx", "rcx"};
-static char *S_REGS[] = {"r8", "r9", "r10"};
+static char *S_REGS[] = {"r8", "r9", "r10", "r11", "r12", "r13"};
 
 static int s_regs_count;
 
@@ -307,16 +307,16 @@ static void emit_string_arith_binop(Node *expr)
 	emit_noindent("%s:", label);
 	emit("mov dil, [rcx+rsi]");
 	emit("mov rdx, rax");
-	emit("add rdx, %s", S_REGS[0]);
+	emit("add rdx, %s", S_REGS[s_regs_count-2]);
 	emit("add rdx, rsi");
 	emit("mov [rdx], dil");
 	emit("inc rsi");
-	emit("cmp rsi, %s", S_REGS[1]);
+	emit("cmp rsi, %s", S_REGS[s_regs_count-1]);
 	emit("jne %s", label);
 
-	emit("add %s, %s", S_REGS[0], S_REGS[1]);
+	emit("add %s, %s", S_REGS[s_regs_count-2], S_REGS[s_regs_count-1]);
 
-	s_regs_count = 1;
+	s_regs_count -= 1;
 }
 
 static void emit_comp_binop(Node *expr)
