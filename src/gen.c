@@ -9,6 +9,8 @@
 static char *P_REGS[] = {"rdi", "rsi", "rdx", "rcx"};
 static char *S_REGS[] = {"r8", "r9", "r10", "r11", "r12", "r13"};
 
+static int vregs_idx;
+
 static int s_regs_count;
 
 static int stack_offset;
@@ -26,20 +28,6 @@ static void emit_store();
 
 #define emit(...)		emitf("\t"  __VA_ARGS__)
 #define emit_noindent(...)	emitf(__VA_ARGS__)
-
-static int lvar_hashtable[512];
-
-// modified djb2 from http://www.cse.yorku.ca/~oz/hash.html
-static unsigned long hash(char *str)
-{
-	unsigned long hash = 5381;
-	int c;
-
-	while (c = *str++)
-		hash = ((hash << 5) + hash) + c; /* hash * 33 + c */
-
-	return hash % 1024;
-}
 
 void set_output_file(FILE *fp)
 {
@@ -134,6 +122,7 @@ static void emit_func_prologue(Node *func)
 	push("rbp");
 	emit("mov rbp, rsp");
 	stack_offset = 0;
+	vregs_idx = 0;
 
 	push_func_params(func->fnparams, func->n_params);
 	
@@ -156,16 +145,12 @@ static void emit_store(Node *n)
 	switch (n->type)
 	{
 		case AST_DECLARATION:
-			emit_declaration(n);
-			emit("mov v%d, rax", lvar_hashtable[hash(n->vlabel)]);
-			break;
 		case AST_IDENT:
-			//if (n->lvar_valproppair->loff == 0) {
-			//	stack_offset += 8;	// adjust depending on type
-			//	n->lvar_valproppair->loff = stack_offset;
-			//}
-			//emit("mov [rbp+%d], rax", n->lvar_valproppair->loff);
-			emit("mov v%d, rax", lvar_hashtable[hash(n->name)]);
+			if (n->lvar_valproppair->loff == 0) {
+				stack_offset += 8;	// adjust depending on type
+				n->lvar_valproppair->loff = stack_offset;
+			}
+			emit("mov [rbp+%d], v%d", n->lvar_valproppair->loff, vregs_idx++);
 			break;
 	}
 }
@@ -230,10 +215,10 @@ static void emit_literal(Node *expr)
 	switch (expr->type)
 	{
 		case AST_INT:
-			emit("mov rax, %u", expr->ival);
+			emit("mov v%d, %u", vregs_idx, expr->ival);
 			break;
 		case AST_BOOL:
-			emit("mov rax, %u", expr->bval);
+			emit("mov v%d, %u", vregs_idx, expr->bval);
 			break;
 		case AST_STRING:
 			if (!expr->slabel) {
@@ -242,8 +227,8 @@ static void emit_literal(Node *expr)
 				emit("%s db %s", expr->slabel, expr->sval);
 				emit_noindent("\nsection .text");
 			}
-			emit("mov rax, %s", expr->slabel);
-			emit("mov %s, %ld", S_REGS[s_regs_count++], expr->slen);
+			emit("mov v%d, %s", vregs_idx++, expr->slabel);
+			emit("mov v%d, %ld", vregs_idx, expr->slen);
 			break;
 		case AST_ARRAY:
 			if (!expr->alabel) {
@@ -252,7 +237,7 @@ static void emit_literal(Node *expr)
 				emit("%s db %s", expr->alabel, getArrayElems(expr, expr->array_member_type));
 				emit_noindent("\nsection .text");
 			}
-			emit("mov rax, %s", expr->alabel);
+			emit("mov v%d, %s", vregs_idx, expr->alabel);
 			break;
 		default:
 			printf("Internal error.");
@@ -280,7 +265,7 @@ static void emit_idx_array(Node *n)
 
 static void emit_load(int offset, char *base)
 {
-	emit("mov rax, [%s+%d]", base, offset);
+	emit("mov v%d, [%s+%d]", vregs_idx, base, offset);
 }
 
 static void emit_lvar(Node *n)
@@ -290,10 +275,8 @@ static void emit_lvar(Node *n)
 
 static void emit_declaration(Node *n)
 {
-	static int rindex = 0;
-	//stack_offset += 8;	// adjust depending on type
-	//n->lvar_valproppair->loff = stack_offset;
-	lvar_hashtable[hash(n->vlabel)] = rindex++;	
+	stack_offset += 8;	// adjust depending on type
+	n->lvar_valproppair->loff = stack_offset;
 }
 
 static void emit_int_arith_binop(Node *expr)
@@ -306,10 +289,10 @@ static void emit_int_arith_binop(Node *expr)
 	}
 
 	emit_expr(expr->left);
-	push("rax");
+	emit("mov rdx, rax");
 	emit_expr(expr->right);
 	emit("mov rcx, rax");
-	pop("rax");
+	emit("mov rax, rdx");
 
 	emit("%s rax, rcx", op);
 }
@@ -327,16 +310,15 @@ static void emit_string_arith_binop(Node *expr)
 	emit_noindent("%s:", label);
 	emit("mov dil, [rcx+rsi]");
 	emit("mov rdx, rax");
-	emit("add rdx, %s", S_REGS[s_regs_count-2]);
+	emit("add rdx, v%d", vregs_idx);
 	emit("add rdx, rsi");
 	emit("mov [rdx], dil");
 	emit("inc rsi");
-	emit("cmp rsi, %s", S_REGS[s_regs_count-1]);
+	emit("cmp rsi, v%d", vregs_idx+1);
 	emit("jne %s", label);
 
-	emit("add %s, %s", S_REGS[s_regs_count-2], S_REGS[s_regs_count-1]);
-
-	s_regs_count -= 1;
+	emit("add v%d, v%d", vregs_idx, vregs_idx+1);
+	vregs_idx++;
 }
 
 static void emit_comp_binop(Node *expr)
