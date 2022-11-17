@@ -27,6 +27,20 @@ static void emit_store();
 #define emit(...)		emitf("\t"  __VA_ARGS__)
 #define emit_noindent(...)	emitf(__VA_ARGS__)
 
+static int lvar_hashtable[512];
+
+// modified djb2 from http://www.cse.yorku.ca/~oz/hash.html
+static unsigned long hash(char *str)
+{
+	unsigned long hash = 5381;
+	int c;
+
+	while (c = *str++)
+		hash = ((hash << 5) + hash) + c; /* hash * 33 + c */
+
+	return hash % 1024;
+}
+
 void set_output_file(FILE *fp)
 {
 	outputfp = fp;
@@ -142,12 +156,16 @@ static void emit_store(Node *n)
 	switch (n->type)
 	{
 		case AST_DECLARATION:
+			emit_declaration(n);
+			emit("mov v%d, rax", lvar_hashtable[hash(n->vlabel)]);
+			break;
 		case AST_IDENT:
-			if (n->lvar_valproppair->loff == 0) {
-				stack_offset += 8;	// adjust depending on type
-				n->lvar_valproppair->loff = stack_offset;
-			}
-			emit("mov [rbp+%d], rax", n->lvar_valproppair->loff);
+			//if (n->lvar_valproppair->loff == 0) {
+			//	stack_offset += 8;	// adjust depending on type
+			//	n->lvar_valproppair->loff = stack_offset;
+			//}
+			//emit("mov [rbp+%d], rax", n->lvar_valproppair->loff);
+			emit("mov v%d, rax", lvar_hashtable[hash(n->name)]);
 			break;
 	}
 }
@@ -272,8 +290,10 @@ static void emit_lvar(Node *n)
 
 static void emit_declaration(Node *n)
 {
-	stack_offset += 8;	// adjust depending on type
-	n->lvar_valproppair->loff = stack_offset;
+	static int rindex = 0;
+	//stack_offset += 8;	// adjust depending on type
+	//n->lvar_valproppair->loff = stack_offset;
+	lvar_hashtable[hash(n->vlabel)] = rindex++;	
 }
 
 static void emit_int_arith_binop(Node *expr)

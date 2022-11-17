@@ -132,7 +132,7 @@ void parser_init()
 
 	Node **cfg_array = thread_ast();
 
-	lva(global_functions[0]->fnbody, global_functions[0]->n_stmts);
+	//lva(global_functions[0]->fnbody, global_functions[0]->n_stmts);
 
 #if CFG_OUTPUT
 	for (int i = 0; i < global_function_count; i++) {
