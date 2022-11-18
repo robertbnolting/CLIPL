@@ -26,12 +26,19 @@ static void emit_declaration();
 static void emit_assign();
 static void emit_store();
 
+static void optimize();
+
 #define emit(...)		emitf("\t"  __VA_ARGS__)
 #define emit_noindent(...)	emitf(__VA_ARGS__)
+
+char *outputbuf;
+size_t outputbuf_sz;
 
 void set_output_file(FILE *fp)
 {
 	outputfp = fp;
+	outputbuf = NULL;
+	outputbuf_sz = 0;
 }
 
 static char *make_label() {
@@ -53,11 +60,16 @@ static void emitf(char *fmt, ...) {
 
 	va_list args;
 
-	va_start(args, fmt);
-	vfprintf(outputfp, buf, args);
-	va_end(args);
+	char tmpbuf[128];
 
-	fprintf(outputfp, "\n");
+	va_start(args, fmt);
+	vsprintf(&tmpbuf[0], buf, args);
+	va_end(args);
+	strcat(&tmpbuf[0], "\n");
+
+	outputbuf_sz += strlen(tmpbuf);
+	outputbuf = realloc(outputbuf, outputbuf_sz);
+	strcat(outputbuf, &tmpbuf[0]);
 }
 
 void gen(Node **funcs, size_t n_funcs)
@@ -71,6 +83,10 @@ void gen(Node **funcs, size_t n_funcs)
 	if (!entrypoint_defined) {
 		c_error("No entrypoint was specified. Use keyword 'entry' in front of function to mark it as the entrypoint.", -1);
 	}
+
+	//optimize();
+
+	fprintf(outputfp, outputbuf);
 }
 
 void push(char *reg)
@@ -289,12 +305,13 @@ static void emit_int_arith_binop(Node *expr)
 	}
 
 	emit_expr(expr->left);
-	emit("mov rdx, rax");
+	emit("mov v%d, v%d", vregs_idx+1, vregs_idx);
+	vregs_idx += 2;
 	emit_expr(expr->right);
-	emit("mov rcx, rax");
-	emit("mov rax, rdx");
+	emit("mov v%d, v%d", vregs_idx+1, vregs_idx);
 
-	emit("%s rax, rcx", op);
+	emit("%s v%d, v%d", op, vregs_idx-1, vregs_idx+1);
+	vregs_idx -= 1;
 }
 
 static void emit_string_arith_binop(Node *expr)
@@ -396,4 +413,72 @@ static void emit_expr(Node *expr)
 			emit_binop(expr);
 			break;
 	}
+}
+
+static int *def(int *live, size_t live_sz, char *var)
+{
+	int idx = atoi(var);
+
+	for (int i = 0; i < live_sz; i++) {
+		if (live[i] == idx) {
+			memmove(&live[i], &live[i+1], sizeof(int*) * (live_sz - i));
+			break;
+		}
+	}
+
+	return live;
+}
+
+static int *ref(int *live, size_t live_sz, char *var)
+{
+	int idx = atoi(var);
+	
+	live = realloc(live, live_sz+1);
+	live[live_sz] = idx;
+}
+
+static void clear(char *a)
+{
+	while (*a != 0) {
+		*a = 0;
+		a++;
+	}
+}
+
+static void lva()
+{
+	int *live = NULL;
+	size_t live_sz = 0;
+
+	char mnem[16] = {0};
+	char c;
+	int mnem_len = 0;
+	for (int i = outputbuf_sz-1; i >= 0; i--) {
+		c = outputbuf[i];
+		if (c == ',') {
+			if (mnem[0] == 'v') {
+				live = def(live, live_sz, &mnem[1]);
+				live_sz--;
+			}
+			clear(&mnem[0]);
+			mnem_len = 0;
+		} else if (c == '\n') {
+			if (mnem[0] == 'v') {
+				live = ref(live, live_sz, &mnem[1]);
+				live_sz++;
+			}
+			clear(&mnem[0]);
+			mnem_len = 0;
+		} else if (c == ' ') {
+			clear(&mnem[0]);
+			mnem_len = 0;
+		} else {
+			mnem[mnem_len++] = c;
+		}
+	}
+}
+
+static void optimize()
+{
+	lva();
 }
