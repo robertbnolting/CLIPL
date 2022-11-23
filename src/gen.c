@@ -4,12 +4,19 @@
 #include <stdarg.h>
 
 #include "parse.h"
+#include "gen.h"
 #include "error.h"
 
-static char *P_REGS[] = {"rdi", "rsi", "rdx", "rcx"};
-static char *S_REGS[] = {"r8", "r9", "r10", "r11", "r12", "r13"};
+#define MAX_REGISTER_COUNT 14
+
+static char *REGS[] = {"rax", "rbx", "rcx", "rdx", "rsi", "rdi",
+		       "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"};
+
+//static char *P_REGS[] = {"rdi", "rsi", "rdx", "rcx"};
+//static char *S_REGS[] = {"r8", "r9", "r10", "r11", "r12", "r13"};
 
 static int vregs_idx;
+static int vregs_count;
 
 static int s_regs_count;
 
@@ -26,6 +33,7 @@ static void emit_declaration();
 static void emit_assign();
 static void emit_store();
 
+static InterferenceNode **lva();
 static void optimize();
 
 #define emit(...)		emitf("\t"  __VA_ARGS__)
@@ -33,6 +41,9 @@ static void optimize();
 
 char *outputbuf;
 size_t outputbuf_sz;
+
+MnemNode **ins_array = NULL;
+size_t ins_array_sz = 0;
 
 void set_output_file(FILE *fp)
 {
@@ -48,8 +59,36 @@ static char *make_label() {
 	return fmt;
 }
 
+static void clear(char *a)
+{
+	while (*a != 0) {
+		*a = 0;
+		a++;
+	}
+}
+
+static int is_instruction_mnemonic(char *mnem)
+{
+	if (!strcmp(mnem, "mov") || !strcmp(mnem, "add") || !strcmp(mnem, "cmp") || !strcmp(mnem, "inc")) {
+		return 1;
+	}
+	return 0;
+}
+
+MnemNode *makeMnemNode(char *mnem)
+{
+	MnemNode *r = malloc(sizeof(MnemNode));
+	int len = strlen(mnem);
+	r->mnem = malloc(len+1); 
+	strcpy(r->mnem, mnem);
+
+	r->left = NULL;
+	r->right = NULL;
+
+	return r;
+}
+
 static void emitf(char *fmt, ...) {
-	// from https://github.com/rui314/8cc/blob/master/gen.c
 	char buf[256];
 	int i = 0;
 	for (char *c = fmt; *c; c++) {
@@ -67,8 +106,38 @@ static void emitf(char *fmt, ...) {
 	va_end(args);
 	strcat(&tmpbuf[0], "\n");
 
+	char mnem[50] = {0};
+	size_t mnem_len = 0;
+	char c;
+
+	MnemNode *ins = NULL;
+
+	int counter = 0;
+	// pseudo-asm parser
+	while (c = tmpbuf[counter++]) {
+		if (c == ' ' || c == '\n') {
+			if (is_instruction_mnemonic(mnem)) {
+				ins = makeMnemNode(&mnem[0]);
+			} else if (ins != NULL) {
+				if (ins->left == NULL) {
+					ins->left = makeMnemNode(mnem);
+				} else if (ins->right == NULL) {
+					ins->right = makeMnemNode(mnem);
+
+					ins_array = realloc(ins_array, (ins_array_sz+1) * sizeof(MnemNode *));
+					ins_array[ins_array_sz++] = ins;
+					ins = NULL;
+				}
+			}
+			clear(mnem);
+			mnem_len = 0;
+		} else if (c != '\t' && c != ',') {
+			mnem[mnem_len++] = c;
+		}
+	}
+
 	outputbuf_sz += strlen(tmpbuf);
-	outputbuf = realloc(outputbuf, outputbuf_sz);
+	outputbuf = realloc(outputbuf, outputbuf_sz+1);
 	strcat(outputbuf, &tmpbuf[0]);
 }
 
@@ -84,7 +153,11 @@ void gen(Node **funcs, size_t n_funcs)
 		c_error("No entrypoint was specified. Use keyword 'entry' in front of function to mark it as the entrypoint.", -1);
 	}
 
-	//optimize();
+	//for (int i = 0; i < ins_array_sz; i++) {
+	//	printf("%s %s, %s\n", ins_array[i]->mnem, ins_array[i]->left->mnem, ins_array[i]->right->mnem);
+	//}
+
+	optimize();
 
 	fprintf(outputfp, outputbuf);
 }
@@ -139,6 +212,7 @@ static void emit_func_prologue(Node *func)
 	emit("mov rbp, rsp");
 	stack_offset = 0;
 	vregs_idx = 0;
+	vregs_count = 0;
 
 	push_func_params(func->fnparams, func->n_params);
 	
@@ -167,6 +241,7 @@ static void emit_store(Node *n)
 				n->lvar_valproppair->loff = stack_offset;
 			}
 			emit("mov [rbp+%d], v%d", n->lvar_valproppair->loff, vregs_idx++);
+			vregs_count++;
 			break;
 	}
 }
@@ -243,8 +318,9 @@ static void emit_literal(Node *expr)
 				emit("%s db %s", expr->slabel, expr->sval);
 				emit_noindent("\nsection .text");
 			}
-			emit("mov v%d, %s", vregs_idx++, expr->slabel);
-			emit("mov v%d, %ld", vregs_idx, expr->slen);
+			emit("mov v%d, %ld", vregs_idx++, expr->slen);
+			emit("mov v%d, %s", vregs_idx, expr->slabel);
+			vregs_count++;
 			break;
 		case AST_ARRAY:
 			if (!expr->alabel) {
@@ -307,6 +383,7 @@ static void emit_int_arith_binop(Node *expr)
 	emit_expr(expr->left);
 	emit("mov v%d, v%d", vregs_idx+1, vregs_idx);
 	vregs_idx += 2;
+	vregs_count += 2;
 	emit_expr(expr->right);
 	emit("mov v%d, v%d", vregs_idx+1, vregs_idx);
 
@@ -317,13 +394,30 @@ static void emit_int_arith_binop(Node *expr)
 static void emit_string_arith_binop(Node *expr)
 {
 	emit_expr(expr->left);
-	push("rax");
+	emit("mov v%d, v%d", vregs_idx+1, vregs_idx);
+	vregs_idx += 2;
+	vregs_count += 2;
 	emit_expr(expr->right);
-	emit("mov rcx, rax");
-	emit("pop rax");
+	emit("mov v%d, v%d", vregs_idx+1, vregs_idx);
+	vregs_idx += 2;
+	vregs_count += 2;
 
 	char *label = make_label();
-	emit("mov rsi, 0");
+
+	emit("mov v%d, 0", vregs_idx++);
+	emit_noindent("%s:", label);
+	// handle smaller bit-registers with virtuals
+	emit("mov v%d, [v%d+v%d]", vregs_idx, vregs_idx-3, vregs_idx-1);
+	emit("mov v%d, v%d", vregs_idx+1, vregs_idx-5);
+	emit("add v%d, v%d", vregs_idx+1, vregs_idx-9);
+	emit("add v%d, v%d", vregs_idx+1, vregs_idx-1);
+	emit("mov [v%d], v%d", vregs_idx+1, vregs_idx);
+	emit("inc v%d", vregs_idx-1);
+	emit("cmp v%d, v%d", vregs_idx-1, vregs_idx-7);
+	emit("jne %s", label);
+	emit("add v%d, v%d", vregs_idx-9, vregs_idx-7);
+
+	/*emit("mov rsi, 0");
 	emit_noindent("%s:", label);
 	emit("mov dil, [rcx+rsi]");
 	emit("mov rdx, rax");
@@ -335,7 +429,7 @@ static void emit_string_arith_binop(Node *expr)
 	emit("jne %s", label);
 
 	emit("add v%d, v%d", vregs_idx, vregs_idx+1);
-	vregs_idx++;
+	vregs_idx++; */
 }
 
 static void emit_comp_binop(Node *expr)
@@ -415,70 +509,143 @@ static void emit_expr(Node *expr)
 	}
 }
 
-static int *def(int *live, size_t live_sz, char *var)
+static InterferenceNode **lva()
 {
-	int idx = atoi(var);
-
-	for (int i = 0; i < live_sz; i++) {
-		if (live[i] == idx) {
-			memmove(&live[i], &live[i+1], sizeof(int*) * (live_sz - i));
-			break;
-		}
-	}
-
-	return live;
-}
-
-static int *ref(int *live, size_t live_sz, char *var)
-{
-	int idx = atoi(var);
-	
-	live = realloc(live, live_sz+1);
-	live[live_sz] = idx;
-}
-
-static void clear(char *a)
-{
-	while (*a != 0) {
-		*a = 0;
-		a++;
-	}
-}
-
-static void lva()
-{
-	int *live = NULL;
+	int *live = malloc(0);
 	size_t live_sz = 0;
 
-	char mnem[16] = {0};
-	char c;
-	int mnem_len = 0;
-	for (int i = outputbuf_sz-1; i >= 0; i--) {
-		c = outputbuf[i];
-		if (c == ',') {
-			if (mnem[0] == 'v') {
-				live = def(live, live_sz, &mnem[1]);
-				live_sz--;
+	MnemNode *n;
+
+	InterferenceNode **interference_graph = calloc(vregs_count, sizeof(InterferenceNode *));
+
+	for (int i = ins_array_sz-1; i >= 0; i--) {
+		n = ins_array[i];
+		if (!strcmp(n->mnem, "mov")) {
+			if (n->right->mnem[0] == 'v') {
+				int idx = atoi(n->right->mnem+1);
+				int j;
+				for (j = 0; j < live_sz; j++) {
+					if (live[j] == idx) {
+						break;
+					}
+				}
+				if (j == live_sz) {
+					live = realloc(live, sizeof(int) * (live_sz+1));
+					live[live_sz++] = idx;
+				}
 			}
-			clear(&mnem[0]);
-			mnem_len = 0;
-		} else if (c == '\n') {
-			if (mnem[0] == 'v') {
-				live = ref(live, live_sz, &mnem[1]);
-				live_sz++;
+
+			if (n->left->mnem[0] == 'v') {
+				int idx = atoi(n->left->mnem+1);
+				for (int j = 0; j < live_sz; j++) {
+					if (live[j] == idx) {
+						memmove(&live[j], &live[j+1], sizeof(int) * (live_sz - (j+1)));
+						live_sz--;
+					}
+				}
 			}
-			clear(&mnem[0]);
-			mnem_len = 0;
-		} else if (c == ' ') {
-			clear(&mnem[0]);
-			mnem_len = 0;
 		} else {
-			mnem[mnem_len++] = c;
+			if (n->right->mnem[0] == 'v') {
+				int idx = atoi(n->right->mnem+1);
+				int j;
+				for (j = 0; j < live_sz; j++) {
+					if (live[j] == idx) {
+						break;
+					}
+				}
+				if (j == live_sz) {
+					live = realloc(live, sizeof(int) * (live_sz+1));
+					live[live_sz++] = idx;
+				}
+			}
+			if (n->left->mnem[0] == 'v') {
+				int idx = atoi(n->left->mnem+1);
+				int j;
+				for (j = 0; j < live_sz; j++) {
+					if (live[j] == idx) {
+						break;
+					}
+				}
+				if (j == live_sz) {
+					live = realloc(live, sizeof(int) * (live_sz+1));
+					live[live_sz++] = idx;
+				}
+			}
+		}
+
+		// create InterferenceNode for every live variable not in the graph
+		for (int j = 0; j < live_sz; j++) {
+			int k;
+			for (k = 0; k < vregs_count; k++) {
+				if (interference_graph[k]) {
+					if (interference_graph[k]->idx == live[j]) {
+						break;
+					}
+				}
+			}
+			if (k == vregs_count) {
+				InterferenceNode *n = malloc(sizeof(InterferenceNode));
+				n->idx = live[j];
+				n->neighbors = NULL;
+				n->neighbor_count = 0;
+				interference_graph[live[j]] = n;
+			}
+		}
+
+#define InterNode (interference_graph[live[j]])
+		for (int j = 0; j < live_sz; j++) {
+			for (int k = 0; k < live_sz; k++) {
+				if (live[j] != live[k]) {
+					int l;
+					for (l = 0; l < InterNode->neighbor_count; l++) {
+						if (InterNode->neighbors[l] == interference_graph[live[k]]) {
+							break;
+						}
+					}
+					if (l == InterNode->neighbor_count) {
+						InterNode->neighbors = realloc(InterNode->neighbors, (InterNode->neighbor_count+1) * sizeof(InterferenceNode*));
+						InterNode->neighbors[InterNode->neighbor_count] = interference_graph[live[k]];
+						InterNode->neighbor_count++;
+					}
+				}
+			}
+		}
+#undef InterNode
+
+#if 0
+		printf("LIVE at %d: ", i);
+		for (int j = 0; j < live_sz; j++) {
+			printf("%d, ", live[j]);
+		}
+		printf("\n---\n");
+#endif
+
+	}
+#if 1
+	for (int i = 0; i < vregs_count; i++) {
+		printf("Neighbors of v%d:\n", i);
+		for (int j = 0; j < interference_graph[i]->neighbor_count; j++) {
+			printf("\tv%d\n", interference_graph[i]->neighbors[j]->idx);
 		}
 	}
+#endif
+
+	return interference_graph;
 }
 
 static void optimize()
 {
-	lva();
+	InterferenceNode **graph = lva();
 }
+
+
+
+
+
+
+
+
+
+
+
+
