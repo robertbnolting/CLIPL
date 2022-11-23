@@ -12,8 +12,8 @@
 static char *REGS[] = {"rax", "rbx", "rcx", "rdx", "rsi", "rdi",
 		       "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"};
 
-//static char *P_REGS[] = {"rdi", "rsi", "rdx", "rcx"};
-//static char *S_REGS[] = {"r8", "r9", "r10", "r11", "r12", "r13"};
+static char *P_REGS[] = {"rdi", "rsi", "rdx", "rcx"};
+static char *S_REGS[] = {"r8", "r9", "r10", "r11", "r12", "r13"};
 
 static int vregs_idx;
 static int vregs_count;
@@ -136,9 +136,11 @@ static void emitf(char *fmt, ...) {
 		}
 	}
 
+	/*
 	outputbuf_sz += strlen(tmpbuf);
 	outputbuf = realloc(outputbuf, outputbuf_sz+1);
 	strcat(outputbuf, &tmpbuf[0]);
+	*/
 }
 
 void gen(Node **funcs, size_t n_funcs)
@@ -158,6 +160,20 @@ void gen(Node **funcs, size_t n_funcs)
 	//}
 
 	optimize();
+
+	for (int i = 0; i < ins_array_sz; i++) {
+		char tmpbuf[128];
+		strcpy(tmpbuf, ins_array[i]->mnem);
+		strcat(tmpbuf, " ");
+		strcat(tmpbuf, ins_array[i]->left->mnem);
+		strcat(tmpbuf, ", ");
+		strcat(tmpbuf, ins_array[i]->right->mnem);
+		strcat(tmpbuf, "\n");
+
+		outputbuf_sz += strlen(tmpbuf);
+		outputbuf = realloc(outputbuf, outputbuf_sz+1);
+		strcat(outputbuf, &tmpbuf[0]);
+	}
 
 	fprintf(outputfp, outputbuf);
 }
@@ -588,6 +604,8 @@ static InterferenceNode **lva()
 				n->idx = live[j];
 				n->neighbors = NULL;
 				n->neighbor_count = 0;
+				n->color = -1;
+				n->saturation = 0;
 				interference_graph[live[j]] = n;
 			}
 		}
@@ -633,9 +651,83 @@ static InterferenceNode **lva()
 	return interference_graph;
 }
 
+// Implementation of DSatur graph coloring algorithm
+static void color(InterferenceNode **g)
+{
+	int colored_nodes = 0;
+	while (colored_nodes < vregs_count) {
+		InterferenceNode *highest_sat = NULL;
+		// calculate saturation of each node
+		for (int i = 0; i < vregs_count; i++) {
+			if (g[i]->color < 0) {
+				for (int j = 0; j < g[i]->neighbor_count; j++) {
+					if (g[i]->neighbors[j]->color > 0) {
+						g[i]->saturation++;
+					}
+				}
+				if (!highest_sat) {
+					highest_sat = g[i];
+				} else {
+					if (g[i]->saturation > highest_sat->saturation) {
+						highest_sat = g[i];
+					} else if (g[i]->saturation == highest_sat->saturation) {
+						if (g[i]->neighbor_count > highest_sat->neighbor_count) {
+							highest_sat = g[i];
+						}
+					}
+				}
+			}
+		}
+
+		int lowest_color = -1;
+		for (int i = 0; i < highest_sat->neighbor_count; i++) {
+			if (highest_sat->neighbors[i]->color > lowest_color) {
+				lowest_color = highest_sat->neighbors[i]->color;
+			}
+		}
+		highest_sat->color = lowest_color+1;
+		colored_nodes++;
+	}
+
+	for (int i = 0; i < vregs_count; i++) {
+		printf("v%d: %d\n", g[i]->idx, g[i]->color);
+	}
+}
+
+static void assign_registers(InterferenceNode **g)
+{
+	for (int i = 0; i < ins_array_sz; i++) {
+		if (ins_array[i]->left->mnem[0] == 'v') {
+			int idx = atoi(ins_array[i]->left->mnem+1);
+			char *reg;
+			for (int j = 0; j < vregs_count; j++) {
+				if (g[j]->idx == idx) {
+					reg = REGS[g[j]->color];
+				}
+			}
+			ins_array[i]->left->mnem = realloc(ins_array[i]->left->mnem, strlen(reg) + 1);
+			strcpy(ins_array[i]->left->mnem, reg);
+		}
+		if (ins_array[i]->right->mnem[0] == 'v') {
+			int idx = atoi(ins_array[i]->right->mnem+1);
+			char *reg;
+			for (int j = 0; j < vregs_count; j++) {
+				if (g[j]->idx == idx) {
+					reg = REGS[g[j]->color];
+				}
+			}
+			ins_array[i]->right->mnem = realloc(ins_array[i]->right->mnem, strlen(reg) + 1);
+			strcpy(ins_array[i]->right->mnem, reg);
+		}
+	}
+}
+
 static void optimize()
 {
 	InterferenceNode **graph = lva();
+	color(graph);
+
+	assign_registers(graph);
 }
 
 

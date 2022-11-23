@@ -10,4 +10,7 @@ typedef struct InterferenceNode {
 	int idx;
 	struct InterferenceNode **neighbors;
 	size_t neighbor_count;
+	// used in coloring
+	int color;
+	int saturation;
 } InterferenceNode;
