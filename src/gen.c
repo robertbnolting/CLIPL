@@ -399,7 +399,7 @@ static void emit_int_arith_binop(Node *expr)
 	emit_expr(expr->left);
 	emit("mov v%d, v%d", vregs_idx+1, vregs_idx);
 	vregs_idx += 2;
-	vregs_count += 2;
+	vregs_count++;
 	emit_expr(expr->right);
 	emit("mov v%d, v%d", vregs_idx+1, vregs_idx);
 
@@ -532,7 +532,7 @@ static InterferenceNode **lva()
 
 	MnemNode *n;
 
-	InterferenceNode **interference_graph = calloc(vregs_count, sizeof(InterferenceNode *));
+	InterferenceNode **interference_graph = calloc(vregs_count, sizeof(InterferenceNode));
 
 	for (int i = ins_array_sz-1; i >= 0; i--) {
 		n = ins_array[i];
@@ -602,7 +602,7 @@ static InterferenceNode **lva()
 			if (k == vregs_count) {
 				InterferenceNode *n = malloc(sizeof(InterferenceNode));
 				n->idx = live[j];
-				n->neighbors = NULL;
+				n->neighbors = malloc(0);
 				n->neighbor_count = 0;
 				n->color = -1;
 				n->saturation = 0;
