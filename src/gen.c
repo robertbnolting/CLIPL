@@ -136,11 +136,11 @@ static void emitf(char *fmt, ...) {
 		}
 	}
 
-	/*
+#if 0
 	outputbuf_sz += strlen(tmpbuf);
 	outputbuf = realloc(outputbuf, outputbuf_sz+1);
 	strcat(outputbuf, &tmpbuf[0]);
-	*/
+#endif
 }
 
 void gen(Node **funcs, size_t n_funcs)
@@ -397,14 +397,18 @@ static void emit_int_arith_binop(Node *expr)
 	}
 
 	emit_expr(expr->left);
-	emit("mov v%d, v%d", vregs_idx+1, vregs_idx);
-	vregs_idx += 2;
+	int saved_idx = vregs_idx;
+	//emit("mov v%d, v%d", vregs_idx+1, vregs_idx);
+	//vregs_idx += 2;
+	//vregs_count++;
+	vregs_idx++;
 	vregs_count++;
 	emit_expr(expr->right);
-	emit("mov v%d, v%d", vregs_idx+1, vregs_idx);
+	//emit("mov v%d, v%d", vregs_idx+1, vregs_idx);
 
-	emit("%s v%d, v%d", op, vregs_idx-1, vregs_idx+1);
-	vregs_idx -= 1;
+	emit("%s v%d, v%d", op, vregs_idx, saved_idx);
+	//emit("%s v%d, v%d", op, vregs_idx-1, vregs_idx+1);
+	//vregs_idx -= 1;
 }
 
 static void emit_string_arith_binop(Node *expr)
@@ -412,11 +416,11 @@ static void emit_string_arith_binop(Node *expr)
 	emit_expr(expr->left);
 	emit("mov v%d, v%d", vregs_idx+1, vregs_idx);
 	vregs_idx += 2;
-	vregs_count += 2;
+	vregs_count++;
 	emit_expr(expr->right);
 	emit("mov v%d, v%d", vregs_idx+1, vregs_idx);
 	vregs_idx += 2;
-	vregs_count += 2;
+	vregs_count++;
 
 	char *label = make_label();
 
@@ -671,9 +675,25 @@ static void color(InterferenceNode **g)
 					if (g[i]->saturation > highest_sat->saturation) {
 						highest_sat = g[i];
 					} else if (g[i]->saturation == highest_sat->saturation) {
-						if (g[i]->neighbor_count > highest_sat->neighbor_count) {
+						int uncolored_neighbors_current = 0;
+						for (int j = 0; j < g[i]->neighbor_count; j++) {
+							if (g[i]->neighbors[j]->color < 0)
+								uncolored_neighbors_current++;
+						}
+						int uncolored_neighbors_highest = 0;
+						for (int j = 0; j < highest_sat->neighbor_count; j++) {
+							if (highest_sat->neighbors[j]->color < 0)
+								uncolored_neighbors_highest++;
+						}
+						
+						if (uncolored_neighbors_current > uncolored_neighbors_highest) {
 							highest_sat = g[i];
 						}
+
+						/*
+						if (g[i]->neighbor_count > highest_sat->neighbor_count) {
+							highest_sat = g[i];
+						} */
 					}
 				}
 			}
@@ -688,14 +708,16 @@ static void color(InterferenceNode **g)
 		highest_sat->color = lowest_color+1;
 		colored_nodes++;
 	}
-
+#if 1
 	for (int i = 0; i < vregs_count; i++) {
 		printf("v%d: %d\n", g[i]->idx, g[i]->color);
 	}
+#endif
 }
 
 static void assign_registers(InterferenceNode **g)
 {
+	// TODO: spilling
 	for (int i = 0; i < ins_array_sz; i++) {
 		if (ins_array[i]->left->mnem[0] == 'v') {
 			int idx = atoi(ins_array[i]->left->mnem+1);
