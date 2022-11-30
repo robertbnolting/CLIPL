@@ -7,10 +7,19 @@
 #include "gen.h"
 #include "error.h"
 
-#define MAX_REGISTER_COUNT 14
+#define MAX_REGISTER_COUNT 13
 
-static char *REGS[] = {"rax", "rbx", "rcx", "rdx", "rsi", "rdi",
-		       "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"};
+static char *Q_REGS[] = {"rax", "rbx", "rcx", "rdx", "rsi", "rdi",
+		       	 "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"};
+
+static char *D_REGS[] = {"eax", "ebx", "ecx", "edx", "esi", "edi",
+		       	 "r8d", "r9d", "r10d", "r11d", "r12d", "r13d", "r14d", "r15d"};
+
+static char *W_REGS[] = {"ax", "bx", "cx", "dx", "si", "di",
+		       	 "r8w", "r9w", "r10w", "r11w", "r12w", "r13w", "r14w", "r15w"};
+
+static char *B_REGS[] = {"al", "bl", "cl", "dl", "sil", "dil",
+		       	 "r8b", "r9b", "r10b", "r11b", "r12b", "r13b", "r14b", "r15b"};
 
 static char *P_REGS[] = {"rdi", "rsi", "rdx", "rcx"};
 static char *S_REGS[] = {"r8", "r9", "r10", "r11", "r12", "r13"};
@@ -48,7 +57,7 @@ size_t ins_array_sz = 0;
 void set_output_file(FILE *fp)
 {
 	outputfp = fp;
-	outputbuf = NULL;
+	outputbuf = malloc(0);
 	outputbuf_sz = 0;
 }
 
@@ -67,13 +76,45 @@ static void clear(char *a)
 	}
 }
 
+#define MATCHES(x) (!strcmp(mnem+off, x))
 static int is_instruction_mnemonic(char *mnem)
 {
-	if (!strcmp(mnem, "mov") || !strcmp(mnem, "add") || !strcmp(mnem, "cmp") || !strcmp(mnem, "inc")) {
+	int off = 0;
+	if (mnem[0] == '\t') {
+		off = 1;
+	}
+	if (MATCHES("mov") || MATCHES("add") || MATCHES("cmp") || MATCHES("inc")
+	 || MATCHES("je") || MATCHES("jne")) {
 		return 1;
 	}
 	return 0;
 }
+
+static int is_assignment_mnemonic(char *mnem)
+{
+	int off = 0;
+	if (mnem[0] == '\t') {
+		off = 1;
+	}
+	if (MATCHES("mov")) {
+		return 1;
+	}
+	return 0;
+}
+
+static int is_unary_mnemonic(char *mnem)
+{
+	int off = 0;
+	if (mnem[0] == '\t') {
+		off = 1;
+	}
+	if (MATCHES("push") || MATCHES("pop") || MATCHES("inc") || MATCHES("dec")
+	 || MATCHES("je") || MATCHES("jne")) {
+		return 1;
+	}
+	return 0;
+}
+#undef MATCHES
 
 MnemNode *makeMnemNode(char *mnem)
 {
@@ -111,6 +152,7 @@ static void emitf(char *fmt, ...) {
 	char c;
 
 	MnemNode *ins = NULL;
+	int prev_ins = 0;
 
 	int counter = 0;
 	// pseudo-asm parser
@@ -118,9 +160,17 @@ static void emitf(char *fmt, ...) {
 		if (c == ' ' || c == '\n') {
 			if (is_instruction_mnemonic(mnem)) {
 				ins = makeMnemNode(&mnem[0]);
-			} else if (ins != NULL) {
+				prev_ins = 1;
+				clear(mnem);
+				mnem_len = 0;
+			} else if (ins != NULL && prev_ins) {
 				if (ins->left == NULL) {
 					ins->left = makeMnemNode(mnem);
+					if (is_unary_mnemonic(ins->mnem)) {
+						ins_array = realloc(ins_array, (ins_array_sz+1) * sizeof(MnemNode *));
+						ins_array[ins_array_sz++] = ins;
+						ins = NULL;
+					}
 				} else if (ins->right == NULL) {
 					ins->right = makeMnemNode(mnem);
 
@@ -128,10 +178,21 @@ static void emitf(char *fmt, ...) {
 					ins_array[ins_array_sz++] = ins;
 					ins = NULL;
 				}
+				clear(mnem);
+				mnem_len = 0;
+			} else {
+				if (c == '\n') {
+					MnemNode *other = makeMnemNode(&mnem[0]);
+					ins_array = realloc(ins_array, (ins_array_sz+1) * sizeof(MnemNode *));
+					ins_array[ins_array_sz++] = other;
+					prev_ins = 0;
+					clear(mnem);
+					mnem_len = 0;
+				} else {
+					mnem[mnem_len++] = c;
+				}
 			}
-			clear(mnem);
-			mnem_len = 0;
-		} else if (c != '\t' && c != ',') {
+		} else if (c != ',') {
 			mnem[mnem_len++] = c;
 		}
 	}
@@ -159,19 +220,26 @@ void gen(Node **funcs, size_t n_funcs)
 	//	printf("%s %s, %s\n", ins_array[i]->mnem, ins_array[i]->left->mnem, ins_array[i]->right->mnem);
 	//}
 
-	optimize();
+	//optimize();
 
 	for (int i = 0; i < ins_array_sz; i++) {
-		char tmpbuf[128];
-		strcpy(tmpbuf, ins_array[i]->mnem);
-		strcat(tmpbuf, " ");
-		strcat(tmpbuf, ins_array[i]->left->mnem);
-		strcat(tmpbuf, ", ");
-		strcat(tmpbuf, ins_array[i]->right->mnem);
-		strcat(tmpbuf, "\n");
+		char tmpbuf[128] = {0};
+		if (is_instruction_mnemonic(ins_array[i]->mnem)) {
+			strcpy(tmpbuf, ins_array[i]->mnem);
+			strcat(tmpbuf, " ");
+			strcat(tmpbuf, ins_array[i]->left->mnem);
+			if (!is_unary_mnemonic(ins_array[i]->mnem)) {
+				strcat(tmpbuf, ", ");
+				strcat(tmpbuf, ins_array[i]->right->mnem);
+			}
+			strcat(tmpbuf, "\n");
+		} else {
+			strcpy(tmpbuf, ins_array[i]->mnem);
+			strcat(tmpbuf, "\n");
+		}
 
-		outputbuf_sz += strlen(tmpbuf);
-		outputbuf = realloc(outputbuf, outputbuf_sz+1);
+		outputbuf_sz += strlen(tmpbuf) + 1;
+		outputbuf = realloc(outputbuf, outputbuf_sz);
 		strcat(outputbuf, &tmpbuf[0]);
 	}
 
@@ -253,10 +321,22 @@ static void emit_store(Node *n)
 		case AST_DECLARATION:
 		case AST_IDENT:
 			if (n->lvar_valproppair->loff == 0) {
-				stack_offset += 8;	// adjust depending on type
+				switch (n->lvar_valproppair->type)
+				{
+					case TYPE_INT:
+						emit("mov [rbp+%d], v%d", stack_offset, vregs_idx++);
+						stack_offset += 8;
+						break;
+					case TYPE_STRING:
+						emit("mov [rbp+%d], vw%d", stack_offset, vregs_idx-1);
+						emit("mov [rbp+%d], v%d", stack_offset+2, vregs_idx++);
+						stack_offset += 10;
+						break;
+					default:
+						break;
+				}
 				n->lvar_valproppair->loff = stack_offset;
 			}
-			emit("mov [rbp+%d], v%d", n->lvar_valproppair->loff, vregs_idx++);
 			vregs_count++;
 			break;
 	}
@@ -264,8 +344,8 @@ static void emit_store(Node *n)
 
 static void emit_assign(Node *n)
 {
-	emit_expr(n->right);	// gets saved in rax
-	emit_store(n->left); 	// rax gets stored at stack offset of left
+	emit_expr(n->right);
+	emit_store(n->left);
 }
 
 static char *getArrayElems(Node *expr, int member_type)
@@ -411,45 +491,43 @@ static void emit_int_arith_binop(Node *expr)
 	//vregs_idx -= 1;
 }
 
+// TODO
 static void emit_string_arith_binop(Node *expr)
 {
 	emit_expr(expr->left);
-	emit("mov v%d, v%d", vregs_idx+1, vregs_idx);
-	vregs_idx += 2;
+	int string1 = vregs_idx;
+	int string1_len = vregs_idx-1;
+	vregs_idx++;
 	vregs_count++;
+
 	emit_expr(expr->right);
-	emit("mov v%d, v%d", vregs_idx+1, vregs_idx);
-	vregs_idx += 2;
+	int string2 = vregs_idx;
+	int string2_len = vregs_idx-1;
+	vregs_idx++;
 	vregs_count++;
 
-	char *label = make_label();
+	char *loop_label = make_label();
 
-	emit("mov v%d, 0", vregs_idx++);
-	emit_noindent("%s:", label);
-	// handle smaller bit-registers with virtuals
-	emit("mov v%d, [v%d+v%d]", vregs_idx, vregs_idx-3, vregs_idx-1);
-	emit("mov v%d, v%d", vregs_idx+1, vregs_idx-5);
-	emit("add v%d, v%d", vregs_idx+1, vregs_idx-9);
-	emit("add v%d, v%d", vregs_idx+1, vregs_idx-1);
-	emit("mov [v%d], v%d", vregs_idx+1, vregs_idx);
-	emit("inc v%d", vregs_idx-1);
-	emit("cmp v%d, v%d", vregs_idx-1, vregs_idx-7);
-	emit("jne %s", label);
-	emit("add v%d, v%d", vregs_idx-9, vregs_idx-7);
+	int acc = vregs_idx++;
+	emit("mov v%d, 0", acc);
+	emit_noindent("%s:", loop_label);
 
-	/*emit("mov rsi, 0");
-	emit_noindent("%s:", label);
-	emit("mov dil, [rcx+rsi]");
-	emit("mov rdx, rax");
-	emit("add rdx, v%d", vregs_idx);
-	emit("add rdx, rsi");
-	emit("mov [rdx], dil");
-	emit("inc rsi");
-	emit("cmp rsi, v%d", vregs_idx+1);
-	emit("jne %s", label);
+	int single_char = vregs_idx++;
+	int end_of_string1 = vregs_idx++;
+	emit("mov vb%d, [v%d+v%d]", single_char, string2, acc);
+	emit("mov v%d, v%d", end_of_string1, string1);
+	emit("add v%d, v%d", end_of_string1, string1_len);
+	emit("add v%d, v%d", end_of_string1, acc);
+	emit("mov [v%d], vb%d", end_of_string1, single_char);
+	emit("inc v%d", acc);
+	emit("cmp v%d, v%d", acc, string2_len);
+	emit("jne %s", loop_label);
+	emit("add v%d, v%d", string1_len, string2_len);
 
-	emit("add v%d, v%d", vregs_idx, vregs_idx+1);
-	vregs_idx++; */
+	emit("mov v%d, v%d", vregs_idx++, string1_len);
+	emit("mov v%d, v%d", vregs_idx, string1);
+
+	vregs_count += 3;
 }
 
 static void emit_comp_binop(Node *expr)
@@ -529,6 +607,38 @@ static void emit_expr(Node *expr)
 	}
 }
 
+static int *addToLiveRange(char *var, int *live, size_t *live_sz)
+{
+	if (var[0] == 'v') {
+		int idx;
+		switch (var[1])
+		{
+			case 'd':
+			case 'w':
+			case 'b':
+				idx = atoi(var+2);
+				break;
+			default:
+				idx = atoi(var+1);
+				break;
+		}
+		int j;
+		for (j = 0; j < *live_sz; j++) {
+			if (live[j] == idx) {
+				break;
+			}
+		}
+		if (j == *live_sz) {
+			live = realloc(live, sizeof(int) * (*live_sz+1));
+			live[(*live_sz)++] = idx;
+		}
+	}
+
+	return live;
+}
+
+// TODO: LOOP INTEGRATION
+
 static InterferenceNode **lva()
 {
 	int *live = malloc(0);
@@ -540,9 +650,20 @@ static InterferenceNode **lva()
 
 	for (int i = ins_array_sz-1; i >= 0; i--) {
 		n = ins_array[i];
-		if (!strcmp(n->mnem, "mov")) {
+		if (is_assignment_mnemonic(n->mnem)) {
 			if (n->right->mnem[0] == 'v') {
-				int idx = atoi(n->right->mnem+1);
+				int idx;
+				switch (n->right->mnem[1])
+				{
+					case 'd':
+					case 'w':
+					case 'b':
+						idx = atoi(n->right->mnem+2);
+						break;
+					default:
+						idx = atoi(n->right->mnem+1);
+						break;
+				}
 				int j;
 				for (j = 0; j < live_sz; j++) {
 					if (live[j] == idx) {
@@ -553,33 +674,99 @@ static InterferenceNode **lva()
 					live = realloc(live, sizeof(int) * (live_sz+1));
 					live[live_sz++] = idx;
 				}
+			} else if (n->right->mnem[0] == '[') {
+				char buf[10] = {0};
+				size_t buf_size = 0;
+				char *current = n->right->mnem+1;
+				while (*current != ']') {
+					if (*current == '+') {
+						live = addToLiveRange(buf, live, &live_sz);
+						clear(buf);
+						buf_size = 0;
+					} else {
+						buf[buf_size++] = *current;
+					}
+					current++;
+				}
+				live = addToLiveRange(buf, live, &live_sz);
 			}
 
 			if (n->left->mnem[0] == 'v') {
-				int idx = atoi(n->left->mnem+1);
+				int idx;
+				switch (n->left->mnem[1])
+				{
+					case 'd':
+					case 'w':
+					case 'b':
+						idx = atoi(n->left->mnem+2);
+						break;
+					default:
+						idx = atoi(n->left->mnem+1);
+						break;
+				}
 				for (int j = 0; j < live_sz; j++) {
 					if (live[j] == idx) {
 						memmove(&live[j], &live[j+1], sizeof(int) * (live_sz - (j+1)));
 						live_sz--;
 					}
 				}
-			}
-		} else {
-			if (n->right->mnem[0] == 'v') {
-				int idx = atoi(n->right->mnem+1);
-				int j;
-				for (j = 0; j < live_sz; j++) {
-					if (live[j] == idx) {
-						break;
+			} else if (n->left->mnem[0] == '[') {
+				char buf[10] = {0};
+				size_t buf_size = 0;
+				char *current = n->left->mnem+1;
+				while (*current != ']') {
+					if (*current == '+') {
+						live = addToLiveRange(buf, live, &live_sz);
+						clear(buf);
+						buf_size = 0;
+					} else {
+						buf[buf_size++] = *current;
 					}
+					current++;
 				}
-				if (j == live_sz) {
-					live = realloc(live, sizeof(int) * (live_sz+1));
-					live[live_sz++] = idx;
+				live = addToLiveRange(buf, live, &live_sz);
+			}
+
+		} else if (is_instruction_mnemonic(n->mnem)) {
+			if (!is_unary_mnemonic(n->mnem)) {
+				if (n->right->mnem[0] == 'v') {
+					int idx;
+					switch (n->right->mnem[1])
+					{
+						case 'd':
+						case 'w':
+						case 'b':
+							idx = atoi(n->right->mnem+2);
+							break;
+						default:
+							idx = atoi(n->right->mnem+1);
+							break;
+					}
+					int j;
+					for (j = 0; j < live_sz; j++) {
+						if (live[j] == idx) {
+							break;
+						}
+					}
+					if (j == live_sz) {
+						live = realloc(live, sizeof(int) * (live_sz+1));
+						live[live_sz++] = idx;
+					}
 				}
 			}
 			if (n->left->mnem[0] == 'v') {
-				int idx = atoi(n->left->mnem+1);
+				int idx;
+				switch (n->left->mnem[1])
+				{
+					case 'd':
+					case 'w':
+					case 'b':
+						idx = atoi(n->left->mnem+2);
+						break;
+					default:
+						idx = atoi(n->left->mnem+1);
+						break;
+				}
 				int j;
 				for (j = 0; j < live_sz; j++) {
 					if (live[j] == idx) {
@@ -646,8 +833,12 @@ static InterferenceNode **lva()
 #if 1
 	for (int i = 0; i < vregs_count; i++) {
 		printf("Neighbors of v%d:\n", i);
-		for (int j = 0; j < interference_graph[i]->neighbor_count; j++) {
-			printf("\tv%d\n", interference_graph[i]->neighbors[j]->idx);
+		if (interference_graph[i]) {
+			for (int j = 0; j < interference_graph[i]->neighbor_count; j++) {
+					printf("\tv%d\n", interference_graph[i]->neighbors[j]->idx);
+			}
+		} else {
+			printf("v%d is unused.\n", i);
 		}
 	}
 #endif
@@ -715,37 +906,217 @@ static void color(InterferenceNode **g)
 #endif
 }
 
+static char *assign_color(char *mnem, InterferenceNode **g)
+{
+	if (mnem[0] != 'v')
+		return NULL;
+
+	char *ret = NULL;
+	int idx;
+	char mode;
+	switch (mnem[1])
+	{
+		case 'd':
+		case 'w':
+		case 'b':
+			idx = atoi(mnem+2);
+			mode = mnem[1];
+			break;
+		default:
+			mode = 'q';
+			idx = atoi(mnem+1);
+			break;
+	}
+	char *reg;
+	for (int j = 0; j < vregs_count; j++) {
+		if (g[j]->idx == idx) {
+			if (g[j]->color < MAX_REGISTER_COUNT) {
+				switch (mode)
+				{
+					case 'q':
+						reg = Q_REGS[g[j]->color]; break;
+					case 'd':
+						reg = D_REGS[g[j]->color]; break;
+					case 'w':
+						reg = W_REGS[g[j]->color]; break;
+					case 'b':
+						reg = B_REGS[g[j]->color]; break;
+				}
+				ret = malloc(strlen(reg) + 1);
+				strcpy(ret, reg);
+				break;
+			} else {
+				c_error("Not implemented.\n");
+			}
+		}
+	}
+
+	return ret;
+}
+
 static void assign_registers(InterferenceNode **g)
 {
-	// TODO: spilling
 	for (int i = 0; i < ins_array_sz; i++) {
-		if (ins_array[i]->left->mnem[0] == 'v') {
-			int idx = atoi(ins_array[i]->left->mnem+1);
-			char *reg;
-			for (int j = 0; j < vregs_count; j++) {
-				if (g[j]->idx == idx) {
-					reg = REGS[g[j]->color];
+		MnemNode *n = ins_array[i];
+		if (is_instruction_mnemonic(n->mnem)) {
+			if (n->left->mnem[0] == 'v') {
+				char *reg = assign_color(n->left->mnem, g);
+				if (reg) {
+					n->left->mnem = realloc(n->left->mnem, strlen(reg));
+					strcpy(n->left->mnem, reg);
+				}
+				/*
+				int idx;
+				char mode;
+				switch (n->left->mnem[1])
+				{
+					case 'd':
+					case 'w':
+					case 'b':
+						idx = atoi(n->left->mnem+2);
+						mode = n->left->mnem[1];
+					default:
+						mode = 'q';
+						idx = atoi(n->left->mnem+1);
+						break;
+				}
+				char *reg;
+				for (int j = 0; j < vregs_count; j++) {
+					if (g[j]->idx == idx) {
+						if (g[j]->color < MAX_REGISTER_COUNT) {
+							switch (mode)
+							{
+								case 'q':
+									reg = Q_REGS[g[j]->color]; break;
+								case 'd':
+									reg = D_REGS[g[j]->color]; break;
+								case 'w':
+									reg = W_REGS[g[j]->color]; break;
+								case 'b':
+									reg = B_REGS[g[j]->color]; break;
+							}
+							n->left->mnem = realloc(n->left->mnem, strlen(reg) + 1);
+							strcpy(n->left->mnem, reg);
+							break;
+						} else {
+							c_error("Not implemented.\n");
+						}
+					}
+				}
+				*/
+			} else if (n->left->mnem[0] == '[') {
+				char buf[10] = {0};
+				size_t buf_size = 0;
+
+				char first_buf[10] = {0};
+				char sec_buf[10] = {0};
+
+				int num_regs = 0;
+
+				char *current = n->left->mnem+1;
+				while (*current != ']') {
+					if (*current == '+') {
+						char *reg = assign_color(buf, g);
+						if (reg) {
+							strcpy(first_buf, reg);
+							num_regs = 2;
+							clear(buf);
+							buf_size = 0;
+						}
+					} else {
+						buf[buf_size++] = *current;
+					}
+					current++;
+				}
+				char *reg = assign_color(buf, g);
+				if (reg) {
+					strcpy(sec_buf, reg);
+					if (!num_regs)
+						num_regs = 1;
+				}
+
+				if (num_regs) {
+					if (num_regs == 2) {
+						n->left->mnem = realloc(n->left->mnem, strlen(first_buf) + strlen(sec_buf) + 4);
+						sprintf(n->left->mnem, "[%s+%s]", first_buf, sec_buf);
+					} else {
+						n->left->mnem = realloc(n->left->mnem, strlen(sec_buf) + 3);
+						sprintf(n->left->mnem, "[%s]", sec_buf);
+					}
 				}
 			}
-			ins_array[i]->left->mnem = realloc(ins_array[i]->left->mnem, strlen(reg) + 1);
-			strcpy(ins_array[i]->left->mnem, reg);
-		}
-		if (ins_array[i]->right->mnem[0] == 'v') {
-			int idx = atoi(ins_array[i]->right->mnem+1);
-			char *reg;
-			for (int j = 0; j < vregs_count; j++) {
-				if (g[j]->idx == idx) {
-					reg = REGS[g[j]->color];
+
+			if (!is_unary_mnemonic(n->mnem)){
+				if (n->right->mnem[0] == 'v') {
+					char *reg = assign_color(n->right->mnem, g);
+					if (reg) {
+						n->right->mnem = realloc(n->right->mnem, strlen(reg));
+						strcpy(n->right->mnem, reg);
+					}
+					/*
+					int idx = atoi(n->right->mnem+1);
+					char *reg;
+					for (int j = 0; j < vregs_count; j++) {
+						if (g[j]->idx == idx) {
+							reg = Q_REGS[g[j]->color];
+						}
+					}
+					n->right->mnem = realloc(n->right->mnem, strlen(reg) + 1);
+					strcpy(n->right->mnem, reg);
+					*/
+				} else if (n->right->mnem[0] == '[') {
+					char buf[10] = {0};
+					size_t buf_size = 0;
+
+					char first_buf[10] = {0};
+					char sec_buf[10] = {0};
+
+					int num_regs = 0;
+
+					char *current = n->right->mnem+1;
+					while (*current != ']') {
+						if (*current == '+') {
+							char *reg = assign_color(buf, g);
+							if (reg) {
+								strcpy(first_buf, reg);
+								num_regs = 2;
+								clear(buf);
+								buf_size = 0;
+							}
+						} else {
+							buf[buf_size++] = *current;
+						}
+						current++;
+					}
+					char *reg = assign_color(buf, g);
+					if (reg) {
+						strcpy(sec_buf, reg);
+						if (!num_regs)
+							num_regs = 1;
+					}
+
+					if (num_regs) {
+						if (num_regs == 2) {
+							n->right->mnem = realloc(n->right->mnem, strlen(first_buf) + strlen(sec_buf) + 4);
+							sprintf(n->right->mnem, "[%s+%s]", first_buf, sec_buf);
+						} else {
+							n->right->mnem = realloc(n->right->mnem, strlen(sec_buf) + 3);
+							sprintf(n->right->mnem, "[%s]", sec_buf);
+						}
+					}
 				}
 			}
-			ins_array[i]->right->mnem = realloc(ins_array[i]->right->mnem, strlen(reg) + 1);
-			strcpy(ins_array[i]->right->mnem, reg);
 		}
 	}
 }
 
 static void optimize()
 {
+	vregs_count = vregs_idx;
+
+	printf("IDX: %d\n", vregs_idx);
+	printf("COUNT: %d\n", vregs_count);
+
 	InterferenceNode **graph = lva();
 	color(graph);
 
