@@ -7,6 +7,10 @@
 #include "gen.h"
 #include "error.h"
 
+#define PSEUDO_ASM_OUT 0
+
+static int union_c = 0;
+
 #define MAX_REGISTER_COUNT 13
 
 static char *Q_REGS[] = {"rax", "rbx", "rcx", "rdx", "rsi", "rdi",
@@ -83,10 +87,31 @@ static int is_instruction_mnemonic(char *mnem)
 	if (mnem[0] == '\t') {
 		off = 1;
 	}
-	if (MATCHES("mov") || MATCHES("add") || MATCHES("cmp") || MATCHES("inc")
-	 || MATCHES("je") || MATCHES("jne")) {
-		return 1;
+
+	if (MATCHES("mov")) {
+		return MOV;
+	} else if (MATCHES("add")) {
+		return ADD;
+	} else if (MATCHES("cmp")) {
+		return CMP;
+	} else if (MATCHES("inc")) {
+		return INC;
+	} else if (MATCHES("je")) {
+		return JE;
+	} else if (MATCHES("jne")) {
+		return JNE;
+	} else if (MATCHES("jz")) {
+		return JZ;
+	} else if (MATCHES("jnz")) {
+		return JNZ;
+	} else if (MATCHES("goto")) {
+		return GOTO;
+	} else if (MATCHES("push")) {
+		return PUSH;
+	} else if (MATCHES("pop")) {
+		return POP;
 	}
+
 	return 0;
 }
 
@@ -97,7 +122,7 @@ static int is_assignment_mnemonic(char *mnem)
 		off = 1;
 	}
 	if (MATCHES("mov")) {
-		return 1;
+		return MOV;
 	}
 	return 0;
 }
@@ -108,28 +133,119 @@ static int is_unary_mnemonic(char *mnem)
 	if (mnem[0] == '\t') {
 		off = 1;
 	}
-	if (MATCHES("push") || MATCHES("pop") || MATCHES("inc") || MATCHES("dec")
-	 || MATCHES("je") || MATCHES("jne")) {
-		return 1;
+
+ 	if (MATCHES("inc")) {
+		return INC;
+	} else if (MATCHES("je")) {
+		return JE;
+	} else if (MATCHES("jne")) {
+		return JNE;
+	} else if (MATCHES("jz")) {
+		return JZ;
+	} else if (MATCHES("jnz")) {
+		return JNZ;
+	} else if (MATCHES("goto")) {
+		return GOTO;
+	} else if (MATCHES("push")) {
+		return PUSH;
+	} else if (MATCHES("pop")) {
+		return POP;
 	}
+
 	return 0;
 }
 #undef MATCHES
 
 MnemNode *makeMnemNode(char *mnem)
 {
-	MnemNode *r = malloc(sizeof(MnemNode));
-	int len = strlen(mnem);
-	r->mnem = malloc(len+1); 
-	strcpy(r->mnem, mnem);
+	if (mnem[0] == '\0') {
+		return NULL;
+	}
 
-	r->left = NULL;
-	r->right = NULL;
+	MnemNode *r = malloc(sizeof(MnemNode));
+
+	int off = 0;
+	if (mnem[0] == '\t') {
+		off = 1;
+	}
+
+	int type = is_instruction_mnemonic(mnem);
+
+	if (!type) {
+		char *mnem_p = mnem;
+		char buf[10] = {0};
+		size_t buf_sz = 0;
+
+		if (mnem_p[off] == '[') {
+			while (*(mnem_p++) != ']') {
+				if (*mnem_p == '+') {
+					type = BRACKET_ADD;
+					r->left = makeMnemNode(buf);
+					clear(buf);
+					buf_sz = 0;
+				} else {
+					buf[buf_sz++] = *mnem_p;
+				}
+			}
+			if (type) {
+				r->right = makeMnemNode(buf);
+			} else {
+				type = BRACKET_EXPR;
+				r->left = makeMnemNode(buf);
+			}
+		} else if (mnem_p[off] == 'v') {
+			type = VIRTUAL_REG;
+		} else if (mnem_p[strlen(mnem)-1] == ':') {
+			type = LABEL;
+		}
+	}
+
+	int idx = -1;
+	char mode = 0;
+	if (type == VIRTUAL_REG) {
+		switch (mnem[1])
+		{
+			case 'd':
+			case 'w':
+			case 'b':
+				idx = atoi(mnem+2);
+				mode = mnem[1];
+				break;
+			default:
+				idx = atoi(mnem+1);
+				mode = 'q';
+				break;
+		}
+	}
+
+	r->idx = idx;
+	r->mode = mode;
+
+	if (type != LABEL) {
+		r->mnem = malloc(strlen(mnem) + 1);
+		strcpy(r->mnem, mnem);
+	} else {
+		r->mnem = malloc(strlen(mnem));
+		mnem[strlen(mnem) - 1] = '\0';
+		strcpy(r->mnem, mnem);
+	}
+
+	r->type = type;
+	if (!(type >= BRACKET_EXPR && type <= BRACKET_ADD)) {
+		r->left = NULL;
+		r->right = NULL;
+	}
+
+	r->first_def = -1;
 
 	return r;
 }
 
+// track vregs first definitions
 static void emitf(char *fmt, ...) {
+	static int *vregs = NULL;
+	static size_t vregs_sz = 0;
+
 	char buf[256];
 	int i = 0;
 	for (char *c = fmt; *c; c++) {
@@ -170,6 +286,20 @@ static void emitf(char *fmt, ...) {
 						ins_array = realloc(ins_array, (ins_array_sz+1) * sizeof(MnemNode *));
 						ins_array[ins_array_sz++] = ins;
 						ins = NULL;
+					} else if (is_assignment_mnemonic(ins->mnem)) {
+						if (ins->left->type == VIRTUAL_REG) {
+							int i;
+							for (i = 0; i < vregs_sz; i++) {
+								if (vregs[i] == ins->left->idx) {
+									break;
+								}
+							}
+							if (i == vregs_sz) {
+								ins->left->first_def = ins_array_sz;
+								vregs = realloc(vregs, sizeof(int) * (vregs_sz+1));
+								vregs[vregs_sz++] = ins->left->idx;
+							}
+						}
 					}
 				} else if (ins->right == NULL) {
 					ins->right = makeMnemNode(mnem);
@@ -181,13 +311,15 @@ static void emitf(char *fmt, ...) {
 				clear(mnem);
 				mnem_len = 0;
 			} else {
-				if (c == '\n') {
+				if (c == '\n') { 	// TODO
 					MnemNode *other = makeMnemNode(&mnem[0]);
-					ins_array = realloc(ins_array, (ins_array_sz+1) * sizeof(MnemNode *));
-					ins_array[ins_array_sz++] = other;
-					prev_ins = 0;
-					clear(mnem);
-					mnem_len = 0;
+					if (other) {
+						ins_array = realloc(ins_array, (ins_array_sz+1) * sizeof(MnemNode *));
+						ins_array[ins_array_sz++] = other;
+						prev_ins = 0;
+						clear(mnem);
+						mnem_len = 0;
+					}
 				} else {
 					mnem[mnem_len++] = c;
 				}
@@ -220,19 +352,24 @@ void gen(Node **funcs, size_t n_funcs)
 	//	printf("%s %s, %s\n", ins_array[i]->mnem, ins_array[i]->left->mnem, ins_array[i]->right->mnem);
 	//}
 
-	//optimize();
+#if !PSEUDO_ASM_OUT
+	optimize();
+#endif
 
 	for (int i = 0; i < ins_array_sz; i++) {
 		char tmpbuf[128] = {0};
-		if (is_instruction_mnemonic(ins_array[i]->mnem)) {
+		if (ins_array[i]->type >= MOV && ins_array[i]->type <= POP) {
 			strcpy(tmpbuf, ins_array[i]->mnem);
 			strcat(tmpbuf, " ");
 			strcat(tmpbuf, ins_array[i]->left->mnem);
-			if (!is_unary_mnemonic(ins_array[i]->mnem)) {
+			if (ins_array[i]->type < INC) {
 				strcat(tmpbuf, ", ");
 				strcat(tmpbuf, ins_array[i]->right->mnem);
 			}
 			strcat(tmpbuf, "\n");
+		} else if (ins_array[i]->type == LABEL) {
+			strcpy(tmpbuf, ins_array[i]->mnem);
+			strcat(tmpbuf, ":\n");
 		} else {
 			strcpy(tmpbuf, ins_array[i]->mnem);
 			strcat(tmpbuf, "\n");
@@ -259,7 +396,7 @@ void pop(char *reg)
 // TODO: variable args for syscall parameters
 static void emit_syscall(int code /*,...*/)
 {
-	emit_noindent("\n\tmov rax, %d", code);
+	emit_noindent("\n\n\tmov rax, %d", code);
 	emit("mov rdi, 0");
 
 	emit("syscall");
@@ -319,25 +456,37 @@ static void emit_store(Node *n)
 	switch (n->type)
 	{
 		case AST_DECLARATION:
-		case AST_IDENT:
-			if (n->lvar_valproppair->loff == 0) {
-				switch (n->lvar_valproppair->type)
-				{
-					case TYPE_INT:
-						emit("mov [rbp+%d], v%d", stack_offset, vregs_idx++);
-						stack_offset += 8;
-						break;
-					case TYPE_STRING:
-						emit("mov [rbp+%d], vw%d", stack_offset, vregs_idx-1);
-						emit("mov [rbp+%d], v%d", stack_offset+2, vregs_idx++);
-						stack_offset += 10;
-						break;
-					default:
-						break;
-				}
-				n->lvar_valproppair->loff = stack_offset;
+			n->lvar_valproppair->loff = stack_offset;
+			switch (n->lvar_valproppair->type)
+			{
+				case TYPE_INT:
+					emit("mov [rbp+%d], v%d", stack_offset, vregs_idx++);
+					stack_offset += 8;
+					break;
+				case TYPE_STRING:
+					emit("mov [rbp+%d], vw%d", stack_offset, vregs_idx-1);
+					emit("mov [rbp+%d], v%d", stack_offset+2, vregs_idx++);
+					stack_offset += 10;
+					break;
+				default:
+					break;
 			}
 			vregs_count++;
+			break;
+		case AST_IDENT:
+			int off = n->lvar_valproppair->loff;
+			switch (n->lvar_valproppair->type)
+			{
+				case TYPE_INT:
+					emit("mov [rbp+%d], v%d", off, vregs_idx++);
+					break;
+				case TYPE_STRING:
+					emit("mov [rbp+%d], vw%d", off, vregs_idx-1);
+					emit("mov [rbp+%d], v%d", off+2, vregs_idx++);
+					break;
+				default:
+					break;
+			}
 			break;
 	}
 }
@@ -451,20 +600,40 @@ static void emit_idx_array(Node *n)
 	}
 }
 
-static void emit_load(int offset, char *base)
+static void emit_load(int offset, char *base, int type)
 {
-	emit("mov v%d, [%s+%d]", vregs_idx, base, offset);
+	switch (type)
+	{
+		case TYPE_STRING:
+			emit("mov v%d, 0", vregs_idx);
+			emit("mov vw%d, [%s+%d]", vregs_idx++, base, offset);
+			emit("mov v%d, [%s+%d]", vregs_idx, base, offset+2);
+			break;
+		case TYPE_INT:
+		default:
+			emit("mov v%d, [%s+%d]", vregs_idx, base, offset);
+			break;
+	}
 }
 
 static void emit_lvar(Node *n)
 {
-	emit_load(n->lvar_valproppair->loff, "rbp");
+	emit_load(n->lvar_valproppair->loff, "rbp", n->lvar_valproppair->type);
 }
 
 static void emit_declaration(Node *n)
 {
-	stack_offset += 8;	// adjust depending on type
 	n->lvar_valproppair->loff = stack_offset;
+	switch (n->lvar_valproppair->type)
+	{
+		case TYPE_STRING:
+			stack_offset += 10;
+			break;
+		case TYPE_INT:
+		default:
+			stack_offset += 8;
+			break;
+	}
 }
 
 static void emit_int_arith_binop(Node *expr)
@@ -541,7 +710,7 @@ static void emit_comp_binop(Node *expr)
 	emit("cmp rax, rcx");
 }
 
-static void emit_binop(Node *expr)
+static void op(Node *expr)
 {
 	switch (expr->type)
 	{
@@ -602,26 +771,15 @@ static void emit_expr(Node *expr)
 			emit_assign(expr);
 			break;
 		default:
-			emit_binop(expr);
+			op(expr);
 			break;
 	}
 }
 
-static int *addToLiveRange(char *var, int *live, size_t *live_sz)
+static int *addToLiveRange(MnemNode *n, int *live, size_t *live_sz)
 {
-	if (var[0] == 'v') {
-		int idx;
-		switch (var[1])
-		{
-			case 'd':
-			case 'w':
-			case 'b':
-				idx = atoi(var+2);
-				break;
-			default:
-				idx = atoi(var+1);
-				break;
-		}
+	if (n->type == VIRTUAL_REG) {
+		int idx = n->idx;
 		int j;
 		for (j = 0; j < *live_sz; j++) {
 			if (live[j] == idx) {
@@ -637,150 +795,186 @@ static int *addToLiveRange(char *var, int *live, size_t *live_sz)
 	return live;
 }
 
+static int *deleteFromLiveRange(MnemNode *n, int *live, size_t *live_sz)
+{
+	if (n->type == VIRTUAL_REG) {
+		int idx;
+		char *var = n->mnem;
+		switch (var[1])
+		{
+			case 'd':
+			case 'w':
+			case 'b':
+				idx = atoi(var+2);
+				break;
+			default:
+				idx = atoi(var+1);
+				break;
+		}
+		for (int j = 0; j < *live_sz; j++) {
+			if (live[j] == idx) {
+				memmove(&live[j], &live[j+1], sizeof(int) * (*live_sz - (j+1)));
+				(*live_sz)--;
+			}
+		}
+	}
+
+	return live;
+}
+
+static int *liverange_subtract(int *live1, int *live2, size_t size1, size_t size2)
+{
+	for (int i = 0; i < size2; i++) {
+		for (int j = 0; j < size1; j++) {
+			if (live2[i] == live1[j]) {
+				if (size1 > 1) {
+					memmove(&live1[j], &live1[j+1], sizeof(int) * (size1 - (j+1)));
+				} else {
+					memmove(&live1[j], &live1[j+1], sizeof(int) * (size1 - j));
+				}
+			}
+		}
+	}
+
+	return live1;
+}
+
+static int *liverange_union(int *live1, int *live2, size_t size1, size_t *size2)
+{
+	if (size1 == 0) {
+		return live2;
+	}
+
+	for (int i = 0; i < size1; i++) {
+		int j;
+		for (j = 0; j < *size2; j++) {
+			if (live2[j] == live1[i]) {
+				break;
+			}
+		}
+		if (j == *size2) {
+			live2 = realloc(live2, ((*size2)+1) * sizeof(int));
+			live2[*size2] = live1[i];
+			(*size2)++;
+		}
+	}
+
+	union_c++;
+
+	return live2;
+}
+
 // TODO: LOOP INTEGRATION
 
 static InterferenceNode **lva()
 {
-	int *live = malloc(0);
-	size_t live_sz = 0;
+	int *live_range[ins_array_sz];
+	size_t live_sz_array[ins_array_sz];
 
 	MnemNode *n;
 
 	InterferenceNode **interference_graph = calloc(vregs_count, sizeof(InterferenceNode));
 
-	for (int i = ins_array_sz-1; i >= 0; i--) {
-		n = ins_array[i];
-		if (is_assignment_mnemonic(n->mnem)) {
-			if (n->right->mnem[0] == 'v') {
-				int idx;
-				switch (n->right->mnem[1])
-				{
-					case 'd':
-					case 'w':
-					case 'b':
-						idx = atoi(n->right->mnem+2);
-						break;
-					default:
-						idx = atoi(n->right->mnem+1);
-						break;
-				}
-				int j;
-				for (j = 0; j < live_sz; j++) {
-					if (live[j] == idx) {
-						break;
-					}
-				}
-				if (j == live_sz) {
-					live = realloc(live, sizeof(int) * (live_sz+1));
-					live[live_sz++] = idx;
-				}
-			} else if (n->right->mnem[0] == '[') {
-				char buf[10] = {0};
-				size_t buf_size = 0;
-				char *current = n->right->mnem+1;
-				while (*current != ']') {
-					if (*current == '+') {
-						live = addToLiveRange(buf, live, &live_sz);
-						clear(buf);
-						buf_size = 0;
-					} else {
-						buf[buf_size++] = *current;
-					}
-					current++;
-				}
-				live = addToLiveRange(buf, live, &live_sz);
-			}
+	for (int p = 0; p < 2; p++) {
+		for (int i = ins_array_sz-1; i >= 0; i--) {
+			int *live = malloc(0);
+			size_t live_sz = 0;
 
-			if (n->left->mnem[0] == 'v') {
-				int idx;
-				switch (n->left->mnem[1])
-				{
-					case 'd':
-					case 'w':
-					case 'b':
-						idx = atoi(n->left->mnem+2);
-						break;
-					default:
-						idx = atoi(n->left->mnem+1);
-						break;
-				}
-				for (int j = 0; j < live_sz; j++) {
-					if (live[j] == idx) {
-						memmove(&live[j], &live[j+1], sizeof(int) * (live_sz - (j+1)));
-						live_sz--;
-					}
-				}
-			} else if (n->left->mnem[0] == '[') {
-				char buf[10] = {0};
-				size_t buf_size = 0;
-				char *current = n->left->mnem+1;
-				while (*current != ']') {
-					if (*current == '+') {
-						live = addToLiveRange(buf, live, &live_sz);
-						clear(buf);
-						buf_size = 0;
-					} else {
-						buf[buf_size++] = *current;
-					}
-					current++;
-				}
-				live = addToLiveRange(buf, live, &live_sz);
-			}
+			int *live_del = malloc(0);
+			size_t live_del_sz = 0;
 
-		} else if (is_instruction_mnemonic(n->mnem)) {
-			if (!is_unary_mnemonic(n->mnem)) {
-				if (n->right->mnem[0] == 'v') {
-					int idx;
-					switch (n->right->mnem[1])
-					{
-						case 'd':
-						case 'w':
-						case 'b':
-							idx = atoi(n->right->mnem+2);
-							break;
-						default:
-							idx = atoi(n->right->mnem+1);
-							break;
+			n = ins_array[i];
+			if (n->type == MOV) {
+				if (n->right->type == VIRTUAL_REG) {
+					live = addToLiveRange(n->right, live, &live_sz);
+				} else if (n->right->type >= BRACKET_EXPR && n->right->type <= BRACKET_ADD) {
+					live = addToLiveRange(n->right->left, live, &live_sz);
+
+					if (n->right->type == BRACKET_ADD) {
+						live = addToLiveRange(n->right->right, live, &live_sz);
 					}
-					int j;
-					for (j = 0; j < live_sz; j++) {
-						if (live[j] == idx) {
-							break;
+				}
+
+				if (n->left->type == VIRTUAL_REG) {
+					if (n->left->first_def == i) {
+						live_del = addToLiveRange(n->left, live_del, &live_del_sz);
+					}
+				} else if (n->left->type >= BRACKET_EXPR && n->left->type <= BRACKET_ADD) {
+					if (n->left->left->first_def == i) {
+						live_del = addToLiveRange(n->left->left, live_del, &live_del_sz);
+					}
+
+					if (n->left->type == BRACKET_ADD) {
+						if (n->left->right->first_def == i) {
+							live_del = addToLiveRange(n->left->right, live_del, &live_del_sz);
 						}
 					}
-					if (j == live_sz) {
-						live = realloc(live, sizeof(int) * (live_sz+1));
-						live[live_sz++] = idx;
-					}
 				}
-			}
-			if (n->left->mnem[0] == 'v') {
-				int idx;
-				switch (n->left->mnem[1])
-				{
-					case 'd':
-					case 'w':
-					case 'b':
-						idx = atoi(n->left->mnem+2);
-						break;
-					default:
-						idx = atoi(n->left->mnem+1);
-						break;
-				}
-				int j;
-				for (j = 0; j < live_sz; j++) {
-					if (live[j] == idx) {
-						break;
-					}
-				}
-				if (j == live_sz) {
-					live = realloc(live, sizeof(int) * (live_sz+1));
-					live[live_sz++] = idx;
-				}
-			}
-		}
 
-		// create InterferenceNode for every live variable not in the graph
+			} else if (n->type > MOV && n->type <= POP) { // instruction but not mov
+				if (n->type <= CMP) {	// is binary operation
+					if (n->right->type == VIRTUAL_REG) {
+						live = addToLiveRange(n->right, live, &live_sz);
+					} else if (n->right->type >= BRACKET_EXPR && n->right->type <= BRACKET_ADD) {
+						live = addToLiveRange(n->right->left, live, &live_sz);
+
+						if (n->right->type == BRACKET_ADD) {
+							live = addToLiveRange(n->right->right, live, &live_sz);
+						}
+					}
+				}
+				if (n->left->type == VIRTUAL_REG) {
+					live = addToLiveRange(n->left, live, &live_sz);
+				} else if (n->left->type >= BRACKET_EXPR && n->left->type <= BRACKET_ADD) {
+					live = addToLiveRange(n->left->left, live, &live_sz);
+
+					if (n->left->type == BRACKET_ADD) {
+						live = addToLiveRange(n->left->right, live, &live_sz);
+					}
+				} else if (p == 1 && (n->type >= JE && n->type <= GOTO)) {   // control-flow change instructions
+					char *label = n->left->mnem;
+					int *live_at_label = NULL;
+					size_t live_at_label_sz = 0;
+					for (int j = 0; j < ins_array_sz; j++) {
+						if (ins_array[j]->type == LABEL) {
+							if (!strcmp(ins_array[j]->mnem, label)) {
+								live_at_label = live_range[j];
+								live_at_label_sz = live_sz_array[j];
+								break;
+							}
+						}
+					}
+					if (live_at_label != NULL) {
+						live = liverange_union(live, live_at_label, live_sz, &live_at_label_sz);
+						live_sz = live_at_label_sz;
+					} else {
+						printf("Label %s not found.\n", label);
+						c_error("", -1);
+					}
+				}
+			}
+
+			if (i == ins_array_sz-1) {
+				live_range[i] = malloc(sizeof(int) * live_sz);
+				live_range[i] = memcpy(live_range[i], live, live_sz * sizeof(int));
+
+				live_sz_array[i] = live_sz;
+			} else {
+				live = liverange_union(live_range[i+1], live, live_sz_array[i+1], &live_sz);
+				live_range[i] = malloc(sizeof(int) * live_sz);
+				live_range[i] = memcpy(live_range[i], live, live_sz * sizeof(int));
+				live_range[i] = liverange_subtract(live_range[i], live_del, live_sz, live_del_sz);
+				live_sz_array[i] = live_sz - live_del_sz;
+			}
+			free(live);
+		}
+	}
+
+	// create InterferenceNode for every live variable
+	for (int i = 0; i < ins_array_sz; i++) {
+		int *live = live_range[i];
+		size_t live_sz = live_sz_array[i];
+
 		for (int j = 0; j < live_sz; j++) {
 			int k;
 			for (k = 0; k < vregs_count; k++) {
@@ -821,15 +1015,15 @@ static InterferenceNode **lva()
 		}
 #undef InterNode
 
-#if 0
+#if 1
 		printf("LIVE at %d: ", i);
 		for (int j = 0; j < live_sz; j++) {
 			printf("%d, ", live[j]);
 		}
 		printf("\n---\n");
 #endif
-
 	}
+
 #if 1
 	for (int i = 0; i < vregs_count; i++) {
 		printf("Neighbors of v%d:\n", i);
@@ -962,7 +1156,7 @@ static void assign_registers(InterferenceNode **g)
 			if (n->left->mnem[0] == 'v') {
 				char *reg = assign_color(n->left->mnem, g);
 				if (reg) {
-					n->left->mnem = realloc(n->left->mnem, strlen(reg));
+					n->left->mnem = realloc(n->left->mnem, strlen(reg)+1);
 					strcpy(n->left->mnem, reg);
 				}
 				/*
@@ -1050,7 +1244,7 @@ static void assign_registers(InterferenceNode **g)
 				if (n->right->mnem[0] == 'v') {
 					char *reg = assign_color(n->right->mnem, g);
 					if (reg) {
-						n->right->mnem = realloc(n->right->mnem, strlen(reg));
+						n->right->mnem = realloc(n->right->mnem, strlen(reg)+1);
 						strcpy(n->right->mnem, reg);
 					}
 					/*
