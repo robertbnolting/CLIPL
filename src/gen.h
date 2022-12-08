@@ -17,6 +17,8 @@ enum MnemType {
 	BRACKET_ADD,
 	VIRTUAL_REG,
 	LABEL,
+	LITERAL,
+	SPECIFIER,
 };
 
 typedef struct MnemNode {
@@ -24,6 +26,14 @@ typedef struct MnemNode {
 	char *mnem;
 	struct MnemNode *left;
 	struct MnemNode *right;
+
+	// specifiers like qword, dword, ...
+	struct MnemNode *left_spec;
+	struct MnemNode *right_spec;
+
+	// only for BRACKET_EXPR
+	struct MnemNode **vregs_used;
+	int n_vregs_used;
 	// only for virtual registers
 	int first_def;
 	int idx;
