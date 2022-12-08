@@ -84,9 +84,6 @@ static Node *interpret_expr();
 static void interpret_assignment_expr();
 static void interpret_declaration_expr();
 
-// LVA
-static void lva();
-
 // Parser start
 static Node **global_functions;
 static size_t global_function_count;
@@ -131,8 +128,6 @@ void parser_init()
 	}
 
 	Node **cfg_array = thread_ast();
-
-	//lva(global_functions[0]->fnbody, global_functions[0]->n_stmts);
 
 #if CFG_OUTPUT
 	for (int i = 0; i < global_function_count; i++) {
@@ -1480,7 +1475,7 @@ static Node *read_declaration_expr(int no_assignment)
 						#undef s
 						expect(']', "");
 					} else if (tok->class == ']') {
-						array_size[array_dims] = 0;
+						array_size[array_dims] = -1;
 					}
 					array_dims += 1;
 				} else {
@@ -2161,11 +2156,13 @@ static void checkArraySize(ValPropPair *pair, Node *array, int depth)
 	if (pair->array_size[depth] == 0) {
 		pair->array_size[depth] = array->array_size;
 	} else {
-		if (pair->array_size[depth] != array->array_size) {
-			char msg[128];
-			sprintf(msg, "Array assignment of size %ld to array %s with set size %d.",
-				array->array_size, pair->var_name, pair->array_size[depth]);
-			c_error(msg, -1);
+		if (pair->array_size[depth] > 0) {
+			if (pair->array_size[depth] != array->array_size) {
+				char msg[128];
+				sprintf(msg, "Array assignment of size %ld to array %s with set size %d.",
+					array->array_size, pair->var_name, pair->array_size[depth]);
+				c_error(msg, -1);
+			}
 		}
 	}
 
@@ -2387,7 +2384,7 @@ static void interpret_binary_expr(Node *operator, Stack *opstack, Stack *valstac
 	Node *r_operand = (Node *) pop(opstack);
 	Node *l_operand = (Node *) pop(opstack);
 
-	if ((r_operand->type != l_operand->type) && !( (r_operand->type == AST_IDENT || r_operand->type == AST_ARRAY) 
+	if ((r_operand->type != l_operand->type) && !( (r_operand->type == AST_IDENT || r_operand->type == AST_ARRAY)
 				|| (l_operand->type == AST_IDENT || l_operand->type == AST_ARRAY) )) {
 				c_error("Operands of binary operation must be of the same type.", -1);
 	}
@@ -2905,64 +2902,5 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 
 			break;
 		}
-	}
-}
-
-static char **def(char **live, size_t *sz, Node *expr)
-{
-	for (int i = 0; i < *sz; i++) {
-		if (!strcmp(live[i], (expr->type==AST_IDENT) ? expr->name : expr->vlabel)) {
-			memmove(&live[i], &live[i+1], sizeof(char**) * (((*sz)--) - i));
-			break;
-		}
-	}
-
-	return live;
-}
-
-static char **ref(char **live, size_t *sz, Node *expr)
-{
-	switch (expr->type)
-	{
-		case AST_IDENT:
-		case AST_DECLARATION:
-			for (int i = 0; i < *sz; i++) {
-				if (!strcmp(live[i], (expr->type == AST_IDENT) ? expr->name : expr->vlabel)) {
-					return live;
-				}
-			}
-			live = realloc(live, (*sz + 1) * sizeof(char**));
-			if (expr->type == AST_IDENT) {
-				live[*sz] = expr->name;
-			} else {
-				live[*sz] = expr->vlabel;
-			}
-			(*sz)++;
-			break;
-		case AST_ADD:
-		case AST_SUB:
-		case AST_MUL:
-			live = ref(live, sz, expr->left);
-			live = ref(live, sz, expr->right);
-			break;
-	}
-	return live;
-}
-
-static void lva(Node **body, size_t size)
-{
-	char **live = NULL;
-	size_t live_sz = 0;
-
-	for (int i = size-1; i >= 0; i--) {
-		if (body[i]->type == AST_ASSIGN) {
-			live = def(live, &live_sz, body[i]->left);
-			live = ref(live, &live_sz, body[i]->right);
-		}
-		printf("Liveness at %d:\n", i);
-		for (int j = 0; j < live_sz; j++) {
-			printf("%s\n", live[j]);
-		}
-		printf("----------\n");
 	}
 }

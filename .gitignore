@@ -5,3 +5,4 @@ example_input
 test*
 *.s
 *.asm
+*.sh

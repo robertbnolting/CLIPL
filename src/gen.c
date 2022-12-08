@@ -7,9 +7,7 @@
 #include "gen.h"
 #include "error.h"
 
-#define PSEUDO_ASM_OUT 0
-
-static int union_c = 0;
+#define PSEUDO_ASM_OUT 1
 
 #define MAX_REGISTER_COUNT 13
 
@@ -42,9 +40,11 @@ static void emit_func_prologue();
 static void emit_block();
 static void emit_expr();
 static void emit_literal();
+static void emit_populate_array();
 static void emit_declaration();
 static void emit_assign();
 static void emit_store();
+static void emit_lvar();
 
 static InterferenceNode **lva();
 static void optimize();
@@ -177,7 +177,7 @@ MnemNode *makeMnemNode(char *mnem)
 		size_t buf_sz = 0;
 
 		if (mnem_p[off] == '[') {
-			while (*(mnem_p++) != ']') {
+			while (*(++mnem_p) != ']') {
 				if (*mnem_p == '+') {
 					type = BRACKET_ADD;
 					r->left = makeMnemNode(buf);
@@ -197,6 +197,8 @@ MnemNode *makeMnemNode(char *mnem)
 			type = VIRTUAL_REG;
 		} else if (mnem_p[strlen(mnem)-1] == ':') {
 			type = LABEL;
+		} else if (mnem_p[off] >= '0' && mnem_p[off] <= '9') {
+			type = NUM;
 		}
 	}
 
@@ -236,7 +238,7 @@ MnemNode *makeMnemNode(char *mnem)
 		r->right = NULL;
 	}
 
-	r->first_def = -1;
+	r->first_def = 0;
 
 	return r;
 }
@@ -295,7 +297,7 @@ static void emitf(char *fmt, ...) {
 								}
 							}
 							if (i == vregs_sz) {
-								ins->left->first_def = ins_array_sz;
+								ins->left->first_def = 1;
 								vregs = realloc(vregs, sizeof(int) * (vregs_sz+1));
 								vregs[vregs_sz++] = ins->left->idx;
 							}
@@ -311,7 +313,7 @@ static void emitf(char *fmt, ...) {
 				clear(mnem);
 				mnem_len = 0;
 			} else {
-				if (c == '\n') { 	// TODO
+				if (c == '\n') {
 					MnemNode *other = makeMnemNode(&mnem[0]);
 					if (other) {
 						ins_array = realloc(ins_array, (ins_array_sz+1) * sizeof(MnemNode *));
@@ -324,7 +326,7 @@ static void emitf(char *fmt, ...) {
 					mnem[mnem_len++] = c;
 				}
 			}
-		} else if (c != ',') {
+		} else {// if (c != ',' || (c == ',' && (mnem[mnem_len-1] >= '0' && mnem[mnem_len-1] <= '9'))) {
 			mnem[mnem_len++] = c;
 		}
 	}
@@ -348,12 +350,8 @@ void gen(Node **funcs, size_t n_funcs)
 		c_error("No entrypoint was specified. Use keyword 'entry' in front of function to mark it as the entrypoint.", -1);
 	}
 
-	//for (int i = 0; i < ins_array_sz; i++) {
-	//	printf("%s %s, %s\n", ins_array[i]->mnem, ins_array[i]->left->mnem, ins_array[i]->right->mnem);
-	//}
-
 #if !PSEUDO_ASM_OUT
-	optimize();
+	optimize(); 	// TODO: rename
 #endif
 
 	for (int i = 0; i < ins_array_sz; i++) {
@@ -396,8 +394,8 @@ void pop(char *reg)
 // TODO: variable args for syscall parameters
 static void emit_syscall(int code /*,...*/)
 {
-	emit_noindent("\n\n\tmov rax, %d", code);
-	emit("mov rdi, 0");
+	emit_noindent("\n\n\tmov rax %d", code);
+	emit("mov rdi 0");
 
 	emit("syscall");
 }
@@ -430,10 +428,9 @@ static void emit_func_prologue(Node *func)
 	emit_noindent("global %s", func->flabel);
 	emit_noindent("%s:", func->flabel);
 	push("rbp");
-	emit("mov rbp, rsp");
+	emit("mov rbp rsp");
 	stack_offset = 0;
 	vregs_idx = 0;
-	vregs_count = 0;
 
 	push_func_params(func->fnparams, func->n_params);
 	
@@ -460,29 +457,29 @@ static void emit_store(Node *n)
 			switch (n->lvar_valproppair->type)
 			{
 				case TYPE_INT:
-					emit("mov [rbp+%d], v%d", stack_offset, vregs_idx++);
+					emit("mov [rbp+%d] v%d", stack_offset, vregs_idx++);
 					stack_offset += 8;
 					break;
 				case TYPE_STRING:
-					emit("mov [rbp+%d], vw%d", stack_offset, vregs_idx-1);
-					emit("mov [rbp+%d], v%d", stack_offset+2, vregs_idx++);
+				case TYPE_ARRAY:
+					emit("mov [rbp+%d] vw%d", stack_offset, vregs_idx-1);
+					emit("mov [rbp+%d] v%d", stack_offset+2, vregs_idx++);
 					stack_offset += 10;
 					break;
 				default:
 					break;
 			}
-			vregs_count++;
 			break;
 		case AST_IDENT:
 			int off = n->lvar_valproppair->loff;
 			switch (n->lvar_valproppair->type)
 			{
 				case TYPE_INT:
-					emit("mov [rbp+%d], v%d", off, vregs_idx++);
+					emit("mov [rbp+%d] v%d", off, vregs_idx++);
 					break;
 				case TYPE_STRING:
-					emit("mov [rbp+%d], vw%d", off, vregs_idx-1);
-					emit("mov [rbp+%d], v%d", off+2, vregs_idx++);
+					emit("mov [rbp+%d] vw%d", off, vregs_idx-1);
+					emit("mov [rbp+%d] v%d", off+2, vregs_idx++);
 					break;
 				default:
 					break;
@@ -493,8 +490,55 @@ static void emit_store(Node *n)
 
 static void emit_assign(Node *n)
 {
-	emit_expr(n->right);
-	emit_store(n->left);
+	if (n->right->type == AST_ARRAY) {
+		emit_populate_array(n->left, n->right);
+	} else {
+		emit_expr(n->right);
+		emit_store(n->left);
+	}
+}
+
+static int push_members(Node *array)
+{
+	int n_members = 0;
+
+	for (int i = array->array_size-1; i >= 0; i--) {
+		switch (array->array_elems[i]->type)
+		{
+			case AST_ARRAY:
+				n_members += push_members(array->array_elems[i]);
+				break;
+			case AST_INT:
+			default:
+				char str[10];
+				sprintf(&str[0], "%d", array->array_elems[i]->ival);
+				push(&str[0]);
+				n_members++;
+				break;
+		}
+	}
+
+	return n_members;
+}
+
+static void emit_populate_array(Node *var, Node *array)
+{
+	emit_expr(var);
+	int sz = push_members(array);
+
+	int sz_reg = vregs_idx;
+	emit("mov v%d %ld", vregs_idx++, sz);
+	int array_reg = vregs_idx;
+	emit("mov v%d %s", vregs_idx++, var->lvar_valproppair->asmlabel);
+	int acc_reg = vregs_idx;
+	emit("mov v%d 0", vregs_idx++);
+
+	char *loop_label = make_label();
+	emit("%s:", loop_label);
+	emit("pop qword [v%d+(v%d*4)]", array_reg, acc_reg);
+	emit("inc v%d", acc_reg);
+	emit("cmp v%d v%d", acc_reg, sz_reg);
+	emit("jnz %s", loop_label);
 }
 
 static char *getArrayElems(Node *expr, int member_type)
@@ -551,10 +595,10 @@ static void emit_literal(Node *expr)
 	switch (expr->type)
 	{
 		case AST_INT:
-			emit("mov v%d, %u", vregs_idx, expr->ival);
+			emit("mov v%d %u", vregs_idx, expr->ival);
 			break;
 		case AST_BOOL:
-			emit("mov v%d, %u", vregs_idx, expr->bval);
+			emit("mov v%d %u", vregs_idx, expr->bval);
 			break;
 		case AST_STRING:
 			if (!expr->slabel) {
@@ -563,27 +607,30 @@ static void emit_literal(Node *expr)
 				emit("%s db %s", expr->slabel, expr->sval);
 				emit_noindent("\nsection .text");
 			}
-			emit("mov v%d, %ld", vregs_idx++, expr->slen);
-			emit("mov v%d, %s", vregs_idx, expr->slabel);
-			vregs_count++;
+			emit("mov v%d %ld", vregs_idx++, expr->slen);
+			emit("mov v%d %s", vregs_idx, expr->slabel);
 			break;
 		case AST_ARRAY:
 			if (!expr->alabel) {
 				expr->alabel = make_label();
 				emit_noindent("\nsection .data");
-				emit("%s db %s", expr->alabel, getArrayElems(expr, expr->array_member_type));
+				emit("%s dq %s", expr->alabel, getArrayElems(expr, expr->array_member_type));
 				emit_noindent("\nsection .text");
 			}
-			emit("mov v%d, %s", vregs_idx, expr->alabel);
+			emit("mov v%d %ld", vregs_idx++, expr->array_size);
+			emit("mov v%d %s", vregs_idx, expr->alabel);
 			break;
 		default:
 			printf("Internal error.");
 	}
 }
 
+// TODO: Port all AST_ARRAY properties to registers
 static void emit_idx_array(Node *n)
 {
-	ValPropPair *ref_array = n->lvar_valproppair;
+	emit_lvar(n);
+
+	ValPropPair *ref_array = n->lvar_valproppair; // TODO: check in parse.c if {AST_IDX_ARRAY}->lvar_valproppair is necessary
 	int array_offset = 0;
 	for (int i = 0; i < n->ndim_index; i++) {
 		int sizeacc = 1;
@@ -594,10 +641,11 @@ static void emit_idx_array(Node *n)
 	}
 
 	if (ref_array->array_dims == n->ndim_index) {
-		emit("mov rax, [%s+%d]", ref_array->array_elems->alabel, array_offset);
+		emit("mov v%d [v%d+%d]", vregs_idx+1, vregs_idx, array_offset);
 	} else {
-		emit("mov rax, %s+%d", ref_array->array_elems->alabel, array_offset);
+		emit("mov v%d v%d+%d", vregs_idx+1, ref_array->array_elems->alabel, array_offset);
 	}
+	vregs_idx++;
 }
 
 static void emit_load(int offset, char *base, int type)
@@ -605,13 +653,14 @@ static void emit_load(int offset, char *base, int type)
 	switch (type)
 	{
 		case TYPE_STRING:
-			emit("mov v%d, 0", vregs_idx);
-			emit("mov vw%d, [%s+%d]", vregs_idx++, base, offset);
-			emit("mov v%d, [%s+%d]", vregs_idx, base, offset+2);
+		case TYPE_ARRAY:
+			emit("mov v%d 0", vregs_idx);
+			emit("mov vw%d [%s+%d]", vregs_idx++, base, offset);
+			emit("mov v%d [%s+%d]", vregs_idx, base, offset+2);
 			break;
 		case TYPE_INT:
 		default:
-			emit("mov v%d, [%s+%d]", vregs_idx, base, offset);
+			emit("mov v%d [%s+%d]", vregs_idx, base, offset);
 			break;
 	}
 }
@@ -623,14 +672,33 @@ static void emit_lvar(Node *n)
 
 static void emit_declaration(Node *n)
 {
-	n->lvar_valproppair->loff = stack_offset;
 	switch (n->lvar_valproppair->type)
 	{
 		case TYPE_STRING:
+			n->lvar_valproppair->loff = stack_offset;
 			stack_offset += 10;
+			break;
+		case TYPE_ARRAY:
+			emit_noindent("section .bss");
+
+			n->lvar_valproppair->asmlabel = make_label();
+
+			int acc = 1;
+			for (int i = 0; i < n->v_array_dimensions; i++) {
+				if (n->varray_size[i] < 0) {
+					acc *= 100; 	// TODO: track reserved size
+				} else {
+					acc *= n->varray_size[i];
+				}
+			}
+			// TODO: change resd depending on member type
+			emit("%s resd %d", n->lvar_valproppair->asmlabel, acc);
+
+			emit_noindent("section .text");
 			break;
 		case TYPE_INT:
 		default:
+			n->lvar_valproppair->loff = stack_offset;
 			stack_offset += 8;
 			break;
 	}
@@ -655,48 +723,44 @@ static void emit_int_arith_binop(Node *expr)
 	emit_expr(expr->right);
 	//emit("mov v%d, v%d", vregs_idx+1, vregs_idx);
 
-	emit("%s v%d, v%d", op, vregs_idx, saved_idx);
+	emit("%s v%d v%d", op, vregs_idx, saved_idx);
 	//emit("%s v%d, v%d", op, vregs_idx-1, vregs_idx+1);
 	//vregs_idx -= 1;
 }
 
-// TODO
 static void emit_string_arith_binop(Node *expr)
 {
 	emit_expr(expr->left);
 	int string1 = vregs_idx;
 	int string1_len = vregs_idx-1;
 	vregs_idx++;
-	vregs_count++;
 
 	emit_expr(expr->right);
 	int string2 = vregs_idx;
 	int string2_len = vregs_idx-1;
 	vregs_idx++;
-	vregs_count++;
 
 	char *loop_label = make_label();
 
 	int acc = vregs_idx++;
-	emit("mov v%d, 0", acc);
+	emit("mov v%d 0", acc);
 	emit_noindent("%s:", loop_label);
 
 	int single_char = vregs_idx++;
 	int end_of_string1 = vregs_idx++;
-	emit("mov vb%d, [v%d+v%d]", single_char, string2, acc);
-	emit("mov v%d, v%d", end_of_string1, string1);
-	emit("add v%d, v%d", end_of_string1, string1_len);
-	emit("add v%d, v%d", end_of_string1, acc);
-	emit("mov [v%d], vb%d", end_of_string1, single_char);
+	emit("mov vb%d [v%d+v%d]", single_char, string2, acc);
+	emit("mov v%d v%d", end_of_string1, string1);
+	emit("add v%d v%d", end_of_string1, string1_len);
+	emit("add v%d v%d", end_of_string1, acc);
+	emit("mov [v%d] vb%d", end_of_string1, single_char);
 	emit("inc v%d", acc);
-	emit("cmp v%d, v%d", acc, string2_len);
+	emit("cmp v%d v%d", acc, string2_len);
 	emit("jne %s", loop_label);
-	emit("add v%d, v%d", string1_len, string2_len);
+	emit("add v%d v%d", string1_len, string2_len);
 
-	emit("mov v%d, v%d", vregs_idx++, string1_len);
-	emit("mov v%d, v%d", vregs_idx, string1);
+	emit("mov v%d v%d", vregs_idx++, string1_len);
+	emit("mov v%d v%d", vregs_idx, string1);
 
-	vregs_count += 3;
 }
 
 static void emit_comp_binop(Node *expr)
@@ -704,10 +768,10 @@ static void emit_comp_binop(Node *expr)
 	emit_expr(expr->left);
 	push("rax");
 	emit_expr(expr->right);
-	emit("mov rcx, rax");
+	emit("mov rcx rax");
 	pop("rax");
 
-	emit("cmp rax, rcx");
+	emit("cmp rax rcx");
 }
 
 static void op(Node *expr)
@@ -795,33 +859,6 @@ static int *addToLiveRange(MnemNode *n, int *live, size_t *live_sz)
 	return live;
 }
 
-static int *deleteFromLiveRange(MnemNode *n, int *live, size_t *live_sz)
-{
-	if (n->type == VIRTUAL_REG) {
-		int idx;
-		char *var = n->mnem;
-		switch (var[1])
-		{
-			case 'd':
-			case 'w':
-			case 'b':
-				idx = atoi(var+2);
-				break;
-			default:
-				idx = atoi(var+1);
-				break;
-		}
-		for (int j = 0; j < *live_sz; j++) {
-			if (live[j] == idx) {
-				memmove(&live[j], &live[j+1], sizeof(int) * (*live_sz - (j+1)));
-				(*live_sz)--;
-			}
-		}
-	}
-
-	return live;
-}
-
 static int *liverange_subtract(int *live1, int *live2, size_t size1, size_t size2)
 {
 	for (int i = 0; i < size2; i++) {
@@ -829,8 +866,6 @@ static int *liverange_subtract(int *live1, int *live2, size_t size1, size_t size
 			if (live2[i] == live1[j]) {
 				if (size1 > 1) {
 					memmove(&live1[j], &live1[j+1], sizeof(int) * (size1 - (j+1)));
-				} else {
-					memmove(&live1[j], &live1[j+1], sizeof(int) * (size1 - j));
 				}
 			}
 		}
@@ -848,7 +883,7 @@ static int *liverange_union(int *live1, int *live2, size_t size1, size_t *size2)
 	for (int i = 0; i < size1; i++) {
 		int j;
 		for (j = 0; j < *size2; j++) {
-			if (live2[j] == live1[i]) {
+			if (live1[i] == live2[j]) {
 				break;
 			}
 		}
@@ -859,17 +894,16 @@ static int *liverange_union(int *live1, int *live2, size_t size1, size_t *size2)
 		}
 	}
 
-	union_c++;
-
 	return live2;
 }
-
-// TODO: LOOP INTEGRATION
 
 static InterferenceNode **lva()
 {
 	int *live_range[ins_array_sz];
 	size_t live_sz_array[ins_array_sz];
+
+	int *used_vregs = calloc(vregs_count, sizeof(int));
+	size_t used_vregs_n = 0;
 
 	MnemNode *n;
 
@@ -883,29 +917,50 @@ static InterferenceNode **lva()
 			int *live_del = malloc(0);
 			size_t live_del_sz = 0;
 
+			if ((i == ins_array_sz-1)  && (p == 1) && (used_vregs_n != vregs_count)) { 	// not all vregs used
+				for (int j = 0; j < used_vregs_n; j++) {
+					if (!used_vregs[j]) {
+						live = realloc(live, sizeof(int) * live_sz+1);
+						live[live_sz++] = j;
+					}
+				}
+			}
+
 			n = ins_array[i];
 			if (n->type == MOV) {
 				if (n->right->type == VIRTUAL_REG) {
 					live = addToLiveRange(n->right, live, &live_sz);
+					used_vregs[n->right->idx] = 1;
+					used_vregs_n++;
 				} else if (n->right->type >= BRACKET_EXPR && n->right->type <= BRACKET_ADD) {
+					int saved = live_sz;
 					live = addToLiveRange(n->right->left, live, &live_sz);
+					if (saved != live_sz) {
+						used_vregs[n->right->left->idx] = 1;
+						used_vregs_n++;
+						saved = live_sz;
+					}
 
 					if (n->right->type == BRACKET_ADD) {
 						live = addToLiveRange(n->right->right, live, &live_sz);
+						if (saved != live_sz) {
+							used_vregs[n->right->right->idx] = 1;
+							used_vregs_n++;
+						}
 					}
 				}
 
 				if (n->left->type == VIRTUAL_REG) {
-					if (n->left->first_def == i) {
+					if (n->left->first_def) {
 						live_del = addToLiveRange(n->left, live_del, &live_del_sz);
 					}
 				} else if (n->left->type >= BRACKET_EXPR && n->left->type <= BRACKET_ADD) {
-					if (n->left->left->first_def == i) {
+					if (n->left->left->first_def) {
 						live_del = addToLiveRange(n->left->left, live_del, &live_del_sz);
 					}
 
 					if (n->left->type == BRACKET_ADD) {
-						if (n->left->right->first_def == i) {
+						if (n->left->right->first_def) {
 							live_del = addToLiveRange(n->left->right, live_del, &live_del_sz);
 						}
 					}
@@ -964,7 +1019,9 @@ static InterferenceNode **lva()
 				live_range[i] = malloc(sizeof(int) * live_sz);
 				live_range[i] = memcpy(live_range[i], live, live_sz * sizeof(int));
 				live_range[i] = liverange_subtract(live_range[i], live_del, live_sz, live_del_sz);
-				live_sz_array[i] = live_sz - live_del_sz;
+				if (live_sz >= live_del_sz) {
+					live_sz_array[i] = live_sz - live_del_sz;
+				}
 			}
 			free(live);
 		}
@@ -1153,149 +1210,59 @@ static void assign_registers(InterferenceNode **g)
 	for (int i = 0; i < ins_array_sz; i++) {
 		MnemNode *n = ins_array[i];
 		if (is_instruction_mnemonic(n->mnem)) {
-			if (n->left->mnem[0] == 'v') {
+			if (n->left->type == VIRTUAL_REG) {
 				char *reg = assign_color(n->left->mnem, g);
 				if (reg) {
 					n->left->mnem = realloc(n->left->mnem, strlen(reg)+1);
 					strcpy(n->left->mnem, reg);
 				}
-				/*
-				int idx;
-				char mode;
-				switch (n->left->mnem[1])
-				{
-					case 'd':
-					case 'w':
-					case 'b':
-						idx = atoi(n->left->mnem+2);
-						mode = n->left->mnem[1];
-					default:
-						mode = 'q';
-						idx = atoi(n->left->mnem+1);
-						break;
-				}
-				char *reg;
-				for (int j = 0; j < vregs_count; j++) {
-					if (g[j]->idx == idx) {
-						if (g[j]->color < MAX_REGISTER_COUNT) {
-							switch (mode)
-							{
-								case 'q':
-									reg = Q_REGS[g[j]->color]; break;
-								case 'd':
-									reg = D_REGS[g[j]->color]; break;
-								case 'w':
-									reg = W_REGS[g[j]->color]; break;
-								case 'b':
-									reg = B_REGS[g[j]->color]; break;
-							}
-							n->left->mnem = realloc(n->left->mnem, strlen(reg) + 1);
-							strcpy(n->left->mnem, reg);
-							break;
-						} else {
-							c_error("Not implemented.\n");
-						}
-					}
-				}
-				*/
-			} else if (n->left->mnem[0] == '[') {
-				char buf[10] = {0};
-				size_t buf_size = 0;
-
-				char first_buf[10] = {0};
-				char sec_buf[10] = {0};
-
-				int num_regs = 0;
-
-				char *current = n->left->mnem+1;
-				while (*current != ']') {
-					if (*current == '+') {
-						char *reg = assign_color(buf, g);
-						if (reg) {
-							strcpy(first_buf, reg);
-							num_regs = 2;
-							clear(buf);
-							buf_size = 0;
-						}
+			} else if ((n->left->type == BRACKET_EXPR) || (n->left->type == BRACKET_ADD)) {
+				char *reg1 = assign_color(n->left->left->mnem, g);
+				if (n->left->type == BRACKET_ADD) {
+					char *reg2 = assign_color(n->left->right->mnem, g);
+					if (reg1 && !reg2) {
+						sprintf(n->left->mnem, "[%s+%s]", reg1, n->left->right->mnem);
+					} else if (!reg1 && reg2) {
+						sprintf(n->left->mnem, "[%s+%s]", n->left->left->mnem, reg2);
+					} else if (reg1 && reg2) {
+						sprintf(n->left->mnem, "[%s+%s]", reg1, reg2);
 					} else {
-						buf[buf_size++] = *current;
+						sprintf(n->left->mnem, "[%s+%s]", n->left->left->mnem, n->left->right->mnem);
 					}
-					current++;
-				}
-				char *reg = assign_color(buf, g);
-				if (reg) {
-					strcpy(sec_buf, reg);
-					if (!num_regs)
-						num_regs = 1;
-				}
-
-				if (num_regs) {
-					if (num_regs == 2) {
-						n->left->mnem = realloc(n->left->mnem, strlen(first_buf) + strlen(sec_buf) + 4);
-						sprintf(n->left->mnem, "[%s+%s]", first_buf, sec_buf);
+				} else {
+					if (reg1) {
+						sprintf(n->left->mnem, "[%s]", reg1);
 					} else {
-						n->left->mnem = realloc(n->left->mnem, strlen(sec_buf) + 3);
-						sprintf(n->left->mnem, "[%s]", sec_buf);
+						sprintf(n->left->mnem, "[%s]", n->left->left->mnem);
 					}
 				}
 			}
 
 			if (!is_unary_mnemonic(n->mnem)){
-				if (n->right->mnem[0] == 'v') {
+				if (n->right->type == VIRTUAL_REG) {
 					char *reg = assign_color(n->right->mnem, g);
 					if (reg) {
 						n->right->mnem = realloc(n->right->mnem, strlen(reg)+1);
 						strcpy(n->right->mnem, reg);
 					}
-					/*
-					int idx = atoi(n->right->mnem+1);
-					char *reg;
-					for (int j = 0; j < vregs_count; j++) {
-						if (g[j]->idx == idx) {
-							reg = Q_REGS[g[j]->color];
-						}
-					}
-					n->right->mnem = realloc(n->right->mnem, strlen(reg) + 1);
-					strcpy(n->right->mnem, reg);
-					*/
-				} else if (n->right->mnem[0] == '[') {
-					char buf[10] = {0};
-					size_t buf_size = 0;
-
-					char first_buf[10] = {0};
-					char sec_buf[10] = {0};
-
-					int num_regs = 0;
-
-					char *current = n->right->mnem+1;
-					while (*current != ']') {
-						if (*current == '+') {
-							char *reg = assign_color(buf, g);
-							if (reg) {
-								strcpy(first_buf, reg);
-								num_regs = 2;
-								clear(buf);
-								buf_size = 0;
-							}
+				} else if ((n->right->type == BRACKET_EXPR) || (n->right->type == BRACKET_ADD)) {
+					char *reg1 = assign_color(n->right->left->mnem, g);
+					if (n->right->type == BRACKET_ADD) {
+						char *reg2 = assign_color(n->right->right->mnem, g);
+						if (reg1 && !reg2) {
+							sprintf(n->right->mnem, "[%s+%s]", reg1, n->right->right->mnem);
+						} else if (!reg1 && reg2) {
+							sprintf(n->right->mnem, "[%s+%s]", n->right->left->mnem, reg2);
+						} else if (reg1 && reg2) {
+							sprintf(n->right->mnem, "[%s+%s]", reg1, reg2);
 						} else {
-							buf[buf_size++] = *current;
+							sprintf(n->right->mnem, "[%s+%s]", n->right->left->mnem, n->right->right->mnem);
 						}
-						current++;
-					}
-					char *reg = assign_color(buf, g);
-					if (reg) {
-						strcpy(sec_buf, reg);
-						if (!num_regs)
-							num_regs = 1;
-					}
-
-					if (num_regs) {
-						if (num_regs == 2) {
-							n->right->mnem = realloc(n->right->mnem, strlen(first_buf) + strlen(sec_buf) + 4);
-							sprintf(n->right->mnem, "[%s+%s]", first_buf, sec_buf);
+					} else {
+						if (reg1) {
+							sprintf(n->right->mnem, "[%s]", reg1);
 						} else {
-							n->right->mnem = realloc(n->right->mnem, strlen(sec_buf) + 3);
-							sprintf(n->right->mnem, "[%s]", sec_buf);
+							sprintf(n->right->mnem, "[%s]", n->right->left->mnem);
 						}
 					}
 				}

@@ -81,7 +81,9 @@ typedef struct ValPropPair {
 		};
 		Vector record_vec;
 	};
+	// generation
 	int loff;
+	char *asmlabel;
 } ValPropPair;
 
 typedef struct Node {
