@@ -45,6 +45,9 @@ static void emit_declaration();
 static void emit_assign();
 static void emit_store();
 static void emit_lvar();
+static void emit_array_assign();
+
+static int *getArrayMembers();
 
 static InterferenceNode **lva();
 static void optimize();
@@ -192,7 +195,7 @@ MnemNode *makeMnemNode(char *mnem)
 						if (buf[0] == 'v') {
 							buf[buf_sz++] = *mnem_p;
 						}
-					} else {
+					} else if (*mnem_p == 'v') {
 						buf[buf_sz++] = *mnem_p;
 					}
 				}
@@ -483,18 +486,18 @@ static void emit_store(Node *n)
 	switch (n->type)
 	{
 		case AST_DECLARATION:
-			n->lvar_valproppair->loff = stack_offset;
 			switch (n->lvar_valproppair->type)
 			{
 				case TYPE_INT:
-					emit("mov [rbp+%d] v%d", stack_offset, vregs_idx++);
-					stack_offset += 8;
+					n->lvar_valproppair->loff = stack_offset;
+					stack_offset += 4;
+					emit("mov [rbp-%d] vd%d", stack_offset, vregs_idx++);
 					break;
 				case TYPE_STRING:
-				case TYPE_ARRAY:
-					emit("mov [rbp+%d] vw%d", stack_offset, vregs_idx-1);
-					emit("mov [rbp+%d] v%d", stack_offset+2, vregs_idx++);
+					n->lvar_valproppair->loff = stack_offset;
 					stack_offset += 10;
+					emit("mov [rbp-%d] vw%d", stack_offset, vregs_idx-1);
+					emit("mov [rbp-%d] v%d", stack_offset+2, vregs_idx++);
 					break;
 				default:
 					break;
@@ -505,11 +508,11 @@ static void emit_store(Node *n)
 			switch (n->lvar_valproppair->type)
 			{
 				case TYPE_INT:
-					emit("mov [rbp+%d] v%d", off, vregs_idx++);
+					emit("mov [rbp-%d] v%d", off, vregs_idx++);
 					break;
 				case TYPE_STRING:
-					emit("mov [rbp+%d] vw%d", off, vregs_idx-1);
-					emit("mov [rbp+%d] v%d", off+2, vregs_idx++);
+					emit("mov [rbp-%d] vw%d", off, vregs_idx-1);
+					emit("mov [rbp-%d] v%d", off+2, vregs_idx++);
 					break;
 				default:
 					break;
@@ -520,37 +523,65 @@ static void emit_store(Node *n)
 
 static void emit_assign(Node *n)
 {
-	if (n->right->type == AST_ARRAY) {
-		emit_populate_array(n->left, n->right);
-	} else {
+	if (n->left->lvar_valproppair->type != TYPE_ARRAY) {
 		emit_expr(n->right);
 		emit_store(n->left);
+	} else {
+		emit_array_assign(n->left, n->right);
 	}
 }
 
-static int push_members(Node *array)
+static void emit_array_assign(Node *var, Node *array)
 {
-	int n_members = 0;
+	if (array->type == AST_ARRAY) {
+		size_t member_sz = 0;
+		int *members = getArrayMembers(array, &member_sz);
 
-	for (int i = array->array_size-1; i >= 0; i--) {
+		stack_offset += 4 * member_sz;
+		var->lvar_valproppair->loff = stack_offset;
+
+		for (int i = 0; i < member_sz; i++) {
+			emit("mov dword [rbp-%d] %d", var->lvar_valproppair->loff-4*(member_sz-i), members[i]);
+		}
+	} else if (array->type == AST_IDX_ARRAY) {
+		ValPropPair *ref_array = array->lvar_valproppair;
+		Node *indexed_array;
+		for (int i = 0; i < array->ndim_index; i++) {
+			indexed_array = ref_array->array_elems->array_elems[array->index_values[i]->ival];
+		}
+		emit_array_assign(var, indexed_array);
+	}
+}
+
+static int *getArrayMembers(Node *array, size_t *n_members)
+{
+	int *members = NULL;
+
+	for (int i = 0; i < array->array_size; i++) {
 		switch (array->array_elems[i]->type)
 		{
 			case AST_ARRAY:
-				n_members += push_members(array->array_elems[i]);
+				size_t ret_sz = 0;
+				int *ret = getArrayMembers(array->array_elems[i], &ret_sz);
+				if (ret) {
+					members = realloc(members, (*n_members+ret_sz) * sizeof(int));
+					memcpy(&members[*n_members], ret, ret_sz * sizeof(int));
+					*n_members += ret_sz;
+					free(ret);
+				}
 				break;
 			case AST_INT:
 			default:
-				char str[10];
-				sprintf(&str[0], "%d", array->array_elems[i]->ival);
-				push(&str[0]);
-				n_members++;
+				members = realloc(members, *n_members * sizeof(int));
+				members[(*n_members)++] = array->array_elems[i]->ival;
 				break;
 		}
 	}
 
-	return n_members;
+	return members;
 }
 
+/*
 static void emit_populate_array(Node *var, Node *array)
 {
 	emit_expr(var);
@@ -570,6 +601,7 @@ static void emit_populate_array(Node *var, Node *array)
 	emit("cmp v%d v%d", acc_reg, sz_reg);
 	emit("jnz %s", loop_label);
 }
+*/
 
 static char *getArrayElems(Node *expr, int member_type)
 {
@@ -641,14 +673,6 @@ static void emit_literal(Node *expr)
 			emit("mov v%d %s", vregs_idx, expr->slabel);
 			break;
 		case AST_ARRAY:
-			if (!expr->alabel) {
-				expr->alabel = make_label();
-				emit_noindent("\nsection .data");
-				emit("%s dq %s", expr->alabel, getArrayElems(expr, expr->array_member_type));
-				emit_noindent("\nsection .text");
-			}
-			emit("mov v%d %ld", vregs_idx++, expr->array_size);
-			emit("mov v%d %s", vregs_idx, expr->alabel);
 			break;
 		default:
 			printf("Internal error.");
@@ -658,8 +682,6 @@ static void emit_literal(Node *expr)
 // TODO: Port all AST_ARRAY properties to registers
 static void emit_idx_array(Node *n)
 {
-	emit_lvar(n);
-
 	ValPropPair *ref_array = n->lvar_valproppair; // TODO: check in parse.c if {AST_IDX_ARRAY}->lvar_valproppair is necessary
 	int array_offset = 0;
 	for (int i = 0; i < n->ndim_index; i++) {
@@ -671,11 +693,10 @@ static void emit_idx_array(Node *n)
 	}
 
 	if (ref_array->array_dims == n->ndim_index) {
-		emit("mov v%d [v%d+%d]", vregs_idx+1, vregs_idx, array_offset);
+		emit("mov vd%d [rbp-%d]", vregs_idx, ref_array->loff - 4 * array_offset);
 	} else {
-		emit("mov v%d v%d+%d", vregs_idx+1, ref_array->array_elems->alabel, array_offset);
+		emit("mov v%d rbp-%d", vregs_idx, ref_array->loff + array_offset);
 	}
-	vregs_idx++;
 }
 
 static void emit_load(int offset, char *base, int type)
@@ -684,14 +705,14 @@ static void emit_load(int offset, char *base, int type)
 	{
 		case TYPE_STRING:
 			emit("mov v%d 0", vregs_idx);
-			emit("mov vw%d [%s+%d]", vregs_idx++, base, offset);
-			emit("mov v%d [%s+%d]", vregs_idx, base, offset+2);
+			emit("mov vw%d [%s-%d]", vregs_idx++, base, offset);
+			emit("mov v%d [%s-%d]", vregs_idx, base, offset+2);
 			break;
 		case TYPE_ARRAY:
 			break;
 		case TYPE_INT:
 		default:
-			emit("mov v%d [%s+%d]", vregs_idx, base, offset);
+			emit("mov vd%d [%s-%d]", vregs_idx, base, offset);
 			break;
 	}
 }
@@ -714,31 +735,15 @@ static void emit_declaration(Node *n)
 	switch (n->lvar_valproppair->type)
 	{
 		case TYPE_STRING:
-			n->lvar_valproppair->loff = stack_offset;
 			stack_offset += 10;
+			n->lvar_valproppair->loff = stack_offset;
 			break;
 		case TYPE_ARRAY:
-			emit_noindent("section .bss");
-
-			n->lvar_valproppair->asmlabel = make_label();
-
-			int acc = 1;
-			for (int i = 0; i < n->v_array_dimensions; i++) {
-				if (n->varray_size[i] < 0) {
-					acc *= 100; 	// TODO: track reserved size
-				} else {
-					acc *= n->varray_size[i];
-				}
-			}
-			// TODO: change resd depending on member type
-			emit("%s resd %d", n->lvar_valproppair->asmlabel, acc);
-
-			emit_noindent("section .text");
 			break;
 		case TYPE_INT:
 		default:
+			stack_offset += 4;
 			n->lvar_valproppair->loff = stack_offset;
-			stack_offset += 8;
 			break;
 	}
 }
@@ -802,6 +807,22 @@ static void emit_string_arith_binop(Node *expr)
 
 }
 
+static void emit_array_arith_binop(Node *expr)
+{
+	switch (expr->type)
+	{
+	case AST_ADD:
+		switch (expr->left->type)
+		{
+		case AST_ARRAY:
+			break;
+		}
+		break;
+	default:
+		break;
+	}
+}
+
 static void emit_comp_binop(Node *expr)
 {
 	emit_expr(expr->left);
@@ -824,6 +845,9 @@ static void op(Node *expr)
 		}
 		if (expr->result_type == TYPE_STRING) {
 			emit_string_arith_binop(expr);
+		}
+		if (expr->result_type == TYPE_ARRAY) {
+			emit_array_arith_binop(expr);
 		}
 		break;
 	case AST_GT:

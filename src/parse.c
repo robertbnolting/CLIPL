@@ -2311,6 +2311,20 @@ static void interpret_assignment_expr(Node *expr, Stack *opstack, Stack *valstac
 				break;
 			case AST_IDX_ARRAY:
 			{
+				if (pair->type == TYPE_ARRAY) {
+					if (pair->array_dims + rhs->ndim_index != rhs->lvar_valproppair->array_dims) {
+						char msg[128];
+						sprintf(msg, "Invalid assignment of %d-D array to %d-D array.",
+							rhs->ndim_index, pair->array_dims);
+						c_error(msg, -1);
+					}
+				} else if (rhs->ndim_index != rhs->lvar_valproppair->array_dims) {
+						char msg[128];
+						sprintf(msg, "Invalid assignment of %d-D array to non-array variable.",
+							rhs->ndim_index);
+						c_error(msg, -1);
+
+				}
 				pair->status = 1;
 			}
 			break;
@@ -2396,17 +2410,21 @@ static void interpret_binary_expr(Node *operator, Stack *opstack, Stack *valstac
 			int l = l_operand->ival;
 			int r;
 			if (r_operand->type != AST_INT) {
-				ValPropPair *ident_pair = r_operand->lvar_valproppair;
+				if (r_operand->type == AST_IDENT) {
+					ValPropPair *ident_pair = r_operand->lvar_valproppair;
 
-				if (ident_pair->type != TYPE_INT) {
-					c_error("Operands of binary operation must be of the same type.", -1);
+					if (ident_pair->type != TYPE_INT) {
+						c_error("Operands of binary operation must be of the same type.", -1);
+					}
+					if (ident_pair->status == 0) {
+						c_error("Right operand of binary operation not initialized.", -1);
+					} else if (ident_pair->status == 2) {
+						c_warning("Right operand of binary operation may not be initialized.", -1);
+					}
+					r = ident_pair->ival;
+				} else {
+					c_error("Invalid combination of operands with left-hand-side type int. Try changing the order of the operation.", -1);
 				}
-				if (ident_pair->status == 0) {
-					c_error("Right operand of binary operation not initialized.", -1);
-				} else if (ident_pair->status == 2) {
-					c_warning("Right operand of binary operation may not be initialized.", -1);
-				}
-				r = ident_pair->ival;
 			} else {
 				r = r_operand->ival;
 			}
