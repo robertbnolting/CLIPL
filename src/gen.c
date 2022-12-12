@@ -7,7 +7,7 @@
 #include "gen.h"
 #include "error.h"
 
-#define PSEUDO_ASM_OUT 0
+#define PSEUDO_ASM_OUT 1
 
 #define MAX_REGISTER_COUNT 13
 
@@ -46,6 +46,8 @@ static void emit_assign();
 static void emit_store();
 static void emit_lvar();
 static void emit_array_assign();
+
+static Node *do_array_arithmetic();
 
 static int *getArrayMembers();
 
@@ -533,23 +535,29 @@ static void emit_assign(Node *n)
 
 static void emit_array_assign(Node *var, Node *array)
 {
-	if (array->type == AST_ARRAY) {
+	if (array->type == AST_ARRAY || array->type == AST_IDENT) {
 		size_t member_sz = 0;
 		int *members = getArrayMembers(array, &member_sz);
 
-		stack_offset += 4 * member_sz;
-		var->lvar_valproppair->loff = stack_offset;
+		if (var->type == AST_DECLARATION) {
+			stack_offset += 4 * member_sz;
+		}
+
+		var->lvar_valproppair->loff = 4 * member_sz;
 
 		for (int i = 0; i < member_sz; i++) {
-			emit("mov dword [rbp-%d] %d", var->lvar_valproppair->loff-4*(member_sz-i), members[i]);
+			emit("mov dword [rbp-%d] %d", var->lvar_valproppair->loff-4 * i, members[i]);
 		}
 	} else if (array->type == AST_IDX_ARRAY) {
 		ValPropPair *ref_array = array->lvar_valproppair;
 		Node *indexed_array;
 		for (int i = 0; i < array->ndim_index; i++) {
-			indexed_array = ref_array->array_elems->array_elems[array->index_values[i]->ival];
+			indexed_array = ref_array->array_elems[array->index_values[i]->ival];
 		}
 		emit_array_assign(var, indexed_array);
+	} else { 	// arithmetic operator
+		Node *new_array = do_array_arithmetic(array);
+		emit_array_assign(var, new_array);
 	}
 }
 
@@ -557,12 +565,25 @@ static int *getArrayMembers(Node *array, size_t *n_members)
 {
 	int *members = NULL;
 
-	for (int i = 0; i < array->array_size; i++) {
-		switch (array->array_elems[i]->type)
+	size_t array_size;
+	Node **array_elems;
+
+	if (array->type == AST_ARRAY) {
+		array_size = array->array_size;
+		array_elems = array->array_elems;
+	} else if (array->type == AST_IDENT) {
+		array_size = array->lvar_valproppair->array_size[0];
+		array_elems = array->lvar_valproppair->array_elems;
+	} else {
+		printf("Not implemented.\n");
+	}
+
+	for (int i = 0; i < array_size; i++) {
+		switch (array_elems[i]->type)
 		{
 			case AST_ARRAY:
 				size_t ret_sz = 0;
-				int *ret = getArrayMembers(array->array_elems[i], &ret_sz);
+				int *ret = getArrayMembers(array_elems[i], &ret_sz);
 				if (ret) {
 					members = realloc(members, (*n_members+ret_sz) * sizeof(int));
 					memcpy(&members[*n_members], ret, ret_sz * sizeof(int));
@@ -572,8 +593,8 @@ static int *getArrayMembers(Node *array, size_t *n_members)
 				break;
 			case AST_INT:
 			default:
-				members = realloc(members, *n_members * sizeof(int));
-				members[(*n_members)++] = array->array_elems[i]->ival;
+				members = realloc(members, (*n_members+1) * sizeof(int));
+				members[(*n_members)++] = array_elems[i]->ival;
 				break;
 		}
 	}
@@ -807,17 +828,36 @@ static void emit_string_arith_binop(Node *expr)
 
 }
 
-static void emit_array_arith_binop(Node *expr)
+static Node *do_array_arithmetic(Node *expr)
 {
 	switch (expr->type)
 	{
 	case AST_ADD:
-		switch (expr->left->type)
-		{
-		case AST_ARRAY:
-			break;
+		Node *array = do_array_arithmetic(expr->left);
+		Node **elems;
+		size_t *size;
+	
+
+		if (array->type == AST_ARRAY) {
+			elems = expr->array_elems;
+			size = &expr->array_size;
+		} else if (array->type == AST_IDENT) {
+			ValPropPair *pair = array->lvar_valproppair;
+			elems = pair->array_elems;
+			size = (size_t *) pair->array_size;
+		} else {
+			printf("Not implemented.\n");
 		}
-		break;
+
+		elems = realloc(elems, ((*size)+1) * sizeof(Node*));
+		elems[*size] = expr->right;
+		(*size)++;
+
+		return array;
+	case AST_ARRAY:
+		return expr;
+	case AST_IDENT:
+		return expr;
 	default:
 		break;
 	}
@@ -847,7 +887,7 @@ static void op(Node *expr)
 			emit_string_arith_binop(expr);
 		}
 		if (expr->result_type == TYPE_ARRAY) {
-			emit_array_arith_binop(expr);
+			expr = do_array_arithmetic(expr);
 		}
 		break;
 	case AST_GT:
@@ -1338,9 +1378,6 @@ static void assign_registers(InterferenceNode **g)
 static void optimize()
 {
 	vregs_count = vregs_idx;
-
-	printf("IDX: %d\n", vregs_idx);
-	printf("COUNT: %d\n", vregs_count);
 
 	InterferenceNode **graph = lva();
 	color(graph);

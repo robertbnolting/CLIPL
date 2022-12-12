@@ -77,7 +77,7 @@ typedef struct ValPropPair {
 			int array_type;
 			int array_dims;
 			int *array_size;
-			struct Node *array_elems;
+			struct Node **array_elems;
 		};
 		Vector record_vec;
 	};

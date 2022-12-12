@@ -145,13 +145,6 @@ void parser_init()
 	free(node_array);
 #endif
 
-
-	/*
-	Node *ops;
-	ValPropPair *vals;
-	sym_interpret(cfg_array, &ops, &vals);
-
-	gen(ops, vals); */
 	for (int i = 0; i < global_function_count; i++) {
 		sym_interpret(cfg_array[i]);
 	}
@@ -187,8 +180,7 @@ static Node *printCFG(Node *start)
 		} else if (last->type == CFG_JOIN_NODE) {
 			return last;
 		} else {
-			last = last->successor;
-		}
+			last = last->successor; }
 	}
 
 	return NULL;
@@ -2306,7 +2298,8 @@ static void interpret_assignment_expr(Node *expr, Stack *opstack, Stack *valstac
 
 				checkArraySize(pair, rhs, 0);
 
-				pair->array_elems = rhs;
+				pair->array_elems = rhs->array_elems;
+				pair->array_size[0] = rhs->array_size;
 				pair->status = 1;
 				break;
 			case AST_IDX_ARRAY:
@@ -2668,6 +2661,23 @@ static void interpret_binary_expr(Node *operator, Stack *opstack, Stack *valstac
 					if (!( (op == AST_ADD) || (op == AST_MUL) )) {
 						c_error("Invalid binary operation on operands with type array and \x1b[95mint\x1b[0m.", -1);
 					}
+
+					if (l_operand->array_member_type != r_operand->type) {
+						char msg[128];
+						sprintf(msg, "Invalid binary operation with operands of type %s-array and %s.",
+							datatypeToString(l_operand->array_member_type), datatypeToString(r_operand->type));
+						c_error(msg, -1);
+					}
+
+					/*
+					l_operand->array_elems = realloc(l_operand->array_elems, (l_operand->array_size+1) * sizeof(Node*));
+					l_operand->array_elems[l_operand->array_size] = r_operand;
+					l_operand->array_size++;
+
+					l_operand->successor = operator->successor;
+					*/
+
+					break;
 				case AST_STRING:
 				case AST_FLOAT:
 				case AST_BOOL:
@@ -2703,8 +2713,7 @@ static void interpret_binary_expr(Node *operator, Stack *opstack, Stack *valstac
 							}
 							if (l_operand->array_member_type != pair->type) {
 								char msg[128];
-								sprintf(msg, "Invalid binary operation: Operands of type %s-array and %s.",
-									datatypeToString(l_operand->array_member_type), datatypeToString(pair->type));
+								sprintf(msg, "Invalid binary operation: Operands of type %s-array and %s.", datatypeToString(l_operand->array_member_type), datatypeToString(pair->type));
 								c_error(msg, -1);
 							}
 							break;
@@ -2749,7 +2758,7 @@ static void interpret_binary_expr(Node *operator, Stack *opstack, Stack *valstac
 				break;
 			}
 			operator->result_type = TYPE_ARRAY;
-			push(opstack, operator);
+			push(opstack, l_operand);
 		}
 		break;
 	}
