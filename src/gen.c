@@ -7,7 +7,7 @@
 #include "gen.h"
 #include "error.h"
 
-#define PSEUDO_ASM_OUT 1
+#define PSEUDO_ASM_OUT 0
 
 #define MAX_REGISTER_COUNT 13
 
@@ -539,11 +539,11 @@ static void emit_array_assign(Node *var, Node *array)
 		size_t member_sz = 0;
 		int *members = getArrayMembers(array, &member_sz);
 
-		if (var->type == AST_DECLARATION) {
+		if (var->type == AST_DECLARATION) { 	// TODO: stack-based storage ONLY for constant arrays -- otherwise heap!!!
 			stack_offset += 4 * member_sz;
+			var->lvar_valproppair->loff = stack_offset;
+		} else if (var->type == AST_IDENT) {
 		}
-
-		var->lvar_valproppair->loff = 4 * member_sz;
 
 		for (int i = 0; i < member_sz; i++) {
 			emit("mov dword [rbp-%d] %d", var->lvar_valproppair->loff-4 * i, members[i]);
@@ -1062,6 +1062,8 @@ static InterferenceNode **lva()
 				if (n->type <= CMP) {	// is binary operation
 					if (n->right->type == VIRTUAL_REG) {
 						live = addToLiveRange(n->right, live, &live_sz);
+						used_vregs[n->right->idx] = 1;
+						used_vregs_n++;
 					} else if (n->right->type == BRACKET_EXPR) {
 						for (int i = 0; i < n->right->n_vregs_used; i++) {
 							live = addToLiveRange(n->right->vregs_used[i], live, &live_sz);
