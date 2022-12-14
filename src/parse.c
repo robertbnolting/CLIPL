@@ -84,6 +84,13 @@ static Node *interpret_expr();
 static void interpret_assignment_expr();
 static void interpret_declaration_expr();
 
+static void interpret_binary_expr();
+static void interpret_binary_int_expr();
+static void interpret_binary_string_expr();
+static void interpret_binary_array_expr();
+static void interpret_binary_ident_expr();
+static void interpret_binary_idx_expr();
+
 // Parser start
 static Node **global_functions;
 static size_t global_function_count;
@@ -2393,307 +2400,123 @@ static void interpret_declaration_expr(Node *expr, Stack *opstack, Stack *valsta
 	push(opstack, expr);
 }
 
-static void interpret_binary_expr(Node *operator, Stack *opstack, Stack *valstack) {
-#define op (operator->type)
-	Node *r_operand = (Node *) pop(opstack);
-	Node *l_operand = (Node *) pop(opstack);
+static void interpret_binary_int_expr(int l, Node *r_operand, Node *operator, Stack *opstack, Stack *valstack)
+{
+	int r;
+	if (r_operand->type != AST_INT) {
+		if (r_operand->type == AST_IDENT) {
+			ValPropPair *ident_pair = r_operand->lvar_valproppair;
 
-	if ((r_operand->type != l_operand->type) && !( (r_operand->type == AST_IDENT || r_operand->type == AST_ARRAY)
-				|| (l_operand->type == AST_IDENT || l_operand->type == AST_ARRAY) )) {
+			if (ident_pair->type != TYPE_INT) {
 				c_error("Operands of binary operation must be of the same type.", -1);
+			}
+			if (ident_pair->status == 0) {
+				c_error("Right operand of binary operation not initialized.", -1);
+			} else if (ident_pair->status == 2) {
+				c_warning("Right operand of binary operation may not be initialized.", -1);
+			}
+			r = ident_pair->ival;
+		} else {
+			c_error("Invalid combination of operands with left-hand-side type int. Try changing the order of the operation.", -1);
+		}
+	} else {
+		r = r_operand->ival;
 	}
 
-	switch (l_operand->type)
+	int op = operator->type;
+	switch (op)
 	{
-		case AST_INT:
-		{
-			int l = l_operand->ival;
-			int r;
-			if (r_operand->type != AST_INT) {
-				if (r_operand->type == AST_IDENT) {
-					ValPropPair *ident_pair = r_operand->lvar_valproppair;
+		case AST_ADD:
+			push(opstack, ast_inttype(l + r));
+			break;
+		case AST_SUB:
+			push(opstack, ast_inttype(l - r));
+			break;
+		case AST_MUL:
+			push(opstack, ast_inttype(l * r));
+			break;
+		case AST_DIV:
+			push(opstack, ast_inttype(l / r));
+			break;
+		case AST_GT:
+			push(opstack, ast_booltype(l > r));
+			break;
+		case AST_LT:
+			push(opstack, ast_booltype(l < r));
+			break;
+		case AST_EQ:
+			push(opstack, ast_booltype(l == r));
+			break;
+		case AST_NE:
+			push(opstack, ast_booltype(l != r));
+			break;
+		case AST_GE:
+			push(opstack, ast_booltype(l >= r));
+			break;
+		case AST_LE:
+			push(opstack, ast_booltype(l <= r));
+			break;
+	}
 
-					if (ident_pair->type != TYPE_INT) {
-						c_error("Operands of binary operation must be of the same type.", -1);
-					}
-					if (ident_pair->status == 0) {
-						c_error("Right operand of binary operation not initialized.", -1);
-					} else if (ident_pair->status == 2) {
-						c_warning("Right operand of binary operation may not be initialized.", -1);
-					}
-					r = ident_pair->ival;
-				} else {
-					c_error("Invalid combination of operands with left-hand-side type int. Try changing the order of the operation.", -1);
-				}
-			} else {
-				r = r_operand->ival;
-			}
-			switch (op)
-			{
-				case AST_ADD:
-					push(opstack, ast_inttype(l + r));
-					break;
-				case AST_SUB:
-					push(opstack, ast_inttype(l - r));
-					break;
-				case AST_MUL:
-					push(opstack, ast_inttype(l * r));
-					break;
-				case AST_DIV:
-					push(opstack, ast_inttype(l / r));
-					break;
-				case AST_GT:
-					push(opstack, ast_booltype(l > r));
-					break;
-				case AST_LT:
-					push(opstack, ast_booltype(l < r));
-					break;
-				case AST_EQ:
-					push(opstack, ast_booltype(l == r));
-					break;
-				case AST_NE:
-					push(opstack, ast_booltype(l != r));
-					break;
-				case AST_GE:
-					push(opstack, ast_booltype(l >= r));
-					break;
-				case AST_LE:
-					push(opstack, ast_booltype(l <= r));
-					break;
-			}
+	operator->result_type = TYPE_INT;
+}
 
-			operator->result_type = TYPE_INT;
+static void interpret_binary_string_expr(Node *r_operand, Node *operator, Stack *opstack, Stack *valstack)
+{
+	if (r_operand->type != AST_STRING) {
+		ValPropPair *ident_pair = r_operand->lvar_valproppair;
+
+		if (ident_pair->type != TYPE_STRING) {
+			c_error("Operands of binary operation must be of the same type.", -1);
 		}
-		break;
-		case AST_STRING:
-		{
-			if (r_operand->type != AST_STRING) {
-				ValPropPair *ident_pair = r_operand->lvar_valproppair;
 
-				if (ident_pair->type != TYPE_STRING) {
-					c_error("Operands of binary operation must be of the same type.", -1);
-				}
-
-				if (ident_pair->status == 0) {
-					c_error("Right operand of binary operation not initialized.", -1);
-				} else if (ident_pair->status == 2) {
-					c_warning("Right operand of binary operation may not be initialized.", -1);
-				}
-			}
-			switch (op)
-			{
-				case AST_ADD:
-				case AST_EQ:
-					operator->result_type = TYPE_STRING;
-					push(opstack, ast_stringtype("", -1));
-					break;
-				default:
-					c_error("Illegal operation on value with type string.", -1);
-					break;
-			}
+		if (ident_pair->status == 0) {
+			c_error("Right operand of binary operation not initialized.", -1);
+		} else if (ident_pair->status == 2) {
+			c_warning("Right operand of binary operation may not be initialized.", -1);
 		}
-		break;
-		case AST_IDENT:
-		{
-			ValPropPair *l_op_pair = l_operand->lvar_valproppair;
+	}
 
-			if (l_op_pair->status == 0) {
-				c_error("Left operand of binary operation not initialized.", -1);
-			} else if (l_op_pair->status == 2) {
-				c_warning("Left operand of binary operation may not be initialized.", -1);
-			}
+	int op = operator->type;
+	switch (op)
+	{
+		case AST_ADD:
+		case AST_EQ:
+			operator->result_type = TYPE_STRING;
+			push(opstack, ast_stringtype("", -1));
+			break;
+		default:
+			c_error("Illegal operation on value with type string.", -1);
+			break;
+	}
+}
 
-			switch (l_op_pair->type)
-			{
-				case TYPE_INT:
-				{
-					int l = l_op_pair->ival;
-					int r;
-					switch (r_operand->type)
-					{
-						case AST_INT:
-							r = r_operand->ival;
-							break;
-						case AST_IDENT:
-							ValPropPair *r_op_pair = r_operand->lvar_valproppair;
+static void interpret_binary_ident_expr(Node *l_operand, Node *r_operand, Node *operator, Stack *opstack, Stack *valstack)
+{
+	ValPropPair *l_op_pair = l_operand->lvar_valproppair;
 
-							if (r_op_pair->type != TYPE_INT) {
-								c_error("Operands of binary operation must be of the same type.", -1);
-							}
+	if (l_op_pair->status == 0) {
+		c_error("Left operand of binary operation not initialized.", -1);
+	} else if (l_op_pair->status == 2) {
+		c_warning("Left operand of binary operation may not be initialized.", -1);
+	}
 
-							if (r_op_pair->status == 0) {
-								c_error("Right operand of binary operation not initialized.", -1);
-							} else if (r_op_pair->status == 2) {
-								c_warning("Right operand of binary operation may not be initialized.", -1);
-							}
-
-							r = r_op_pair->ival;
-							break;
-						default:
-							c_error("Operands of binary operation must be of the same type.", -1);
-					}
-
-					switch (op)
-					{
-						case AST_ADD:
-							push(opstack, ast_inttype(l + r));
-							break;
-						case AST_SUB:
-							push(opstack, ast_inttype(l - r));
-							break;
-						case AST_MUL:
-							push(opstack, ast_inttype(l * r));
-							break;
-						case AST_DIV:
-							push(opstack, ast_inttype(l / r));
-							break;
-						case AST_GT:
-							push(opstack, ast_booltype(l > r));
-							break;
-						case AST_LT:
-							push(opstack, ast_booltype(l < r));
-							break;
-						case AST_EQ:
-							push(opstack, ast_booltype(l == r));
-							break;
-						case AST_NE:
-							push(opstack, ast_booltype(l != r));
-							break;
-						case AST_GE:
-							push(opstack, ast_booltype(l >= r));
-							break;
-						case AST_LE:
-							push(opstack, ast_booltype(l <= r));
-							break;
-					}
-
-					operator->result_type = TYPE_INT;
-				}
-				break;
-				case TYPE_STRING:
-				{
-					switch (r_operand->type)
-					{
-						case AST_STRING:
-							break;
-						case AST_IDENT:
-							ValPropPair *r_op_pair = r_operand->lvar_valproppair;
-
-							if (r_op_pair->type != TYPE_STRING) {
-								c_error("Operands of binary operation must be of the same type.", -1);
-							}
-
-							if (r_op_pair->status == 0) {
-								c_error("Right operand of binary operation not initialized.", -1);
-							} else if (r_op_pair->status == 2) {
-								c_warning("Right operand of binary operation may not be initialized.", -1);
-							}
-
-							break;
-						default:
-							c_error("Operands of binary operation must be of the same type.", -1);
-					}
-					switch (op)
-					{
-						case AST_ADD:
-						case AST_EQ:
-							operator->result_type = TYPE_STRING;
-							push(opstack, ast_stringtype("", -1));
-							break;
-						default:
-							c_error("Illegal operation on value with type \x1b[95mstring\x1b[0m.", -1);
-							break;
-					}
-				}
-				break;
-				case TYPE_ARRAY:
-					switch (r_operand->type)
-					{
-						case AST_INT:
-						case AST_STRING:
-						case AST_FLOAT:
-						case AST_BOOL:
-							if (l_op_pair->array_type != r_operand->type) {
-								char msg[128];
-								sprintf(msg, "Invalid binary operation with operands of type %s-array and %s.",
-									datatypeToString(l_operand->array_member_type), datatypeToString(r_operand->type));
-								c_error(msg, -1);
-							}
-							break;
-						case AST_IDENT:
-						{
-							ValPropPair *r_op_pair = r_operand->lvar_valproppair;
-
-							switch (r_op_pair->type)
-							{
-								case TYPE_INT:
-								case TYPE_STRING:
-								case TYPE_FLOAT:
-								case TYPE_BOOL:
-									if (l_op_pair->array_type != r_op_pair->type) {
-										char msg[128];
-										sprintf(msg, "Invalid binary operation with operands of type %s-array and %s.",
-											datatypeToString(l_operand->array_member_type), datatypeToString(r_operand->type));
-										c_error(msg, -1);
-									}
-									break;
-								case TYPE_ARRAY:
-									if (l_op_pair->array_type != r_op_pair->array_type) {
-										char msg[128];
-										sprintf(msg, "Invalid binary operation with operands of type %s-array and %s-array.",
-											datatypeToString(l_op_pair->array_type), datatypeToString(r_op_pair->array_type));
-										c_error(msg, -1);
-									}
-									if (l_op_pair->array_dims != r_op_pair->array_dims) {
-										char msg[128];
-										sprintf(msg, "Invalid binary operation: Operands of %d-D array and %d-D array.",
-											l_op_pair->array_dims, r_op_pair->array_dims);
-										c_error(msg, -1);
-									}
-									break;
-							}
-						}
-						break;
-					}
-					operator->result_type = TYPE_ARRAY;
-					push(opstack, operator);
-			}
-		break;
-		}
-		case AST_ARRAY:
-		{
+	switch (l_op_pair->type)
+	{
+		case TYPE_INT:
+			interpret_binary_int_expr(l_op_pair->ival, r_operand, operator, opstack, valstack);
+			break;
+		case TYPE_STRING:
+			interpret_binary_string_expr(r_operand, operator, opstack, valstack);
+			break;
+		case TYPE_ARRAY:
 			switch (r_operand->type)
 			{
 				case AST_INT:
-					if (!( (op == AST_ADD) || (op == AST_MUL) )) {
-						c_error("Invalid binary operation on operands with type array and \x1b[95mint\x1b[0m.", -1);
-					}
-
-					if (l_operand->array_member_type != r_operand->type) {
-						char msg[128];
-						sprintf(msg, "Invalid binary operation with operands of type %s-array and %s.",
-							datatypeToString(l_operand->array_member_type), datatypeToString(r_operand->type));
-						c_error(msg, -1);
-					}
-
-					/*
-					l_operand->array_elems = realloc(l_operand->array_elems, (l_operand->array_size+1) * sizeof(Node*));
-					l_operand->array_elems[l_operand->array_size] = r_operand;
-					l_operand->array_size++;
-
-					l_operand->successor = operator->successor;
-					*/
-
-					break;
 				case AST_STRING:
 				case AST_FLOAT:
 				case AST_BOOL:
-					if (op != AST_ADD) {
-						char msg[128];
-						sprintf(msg, "Invalid binary operation on operands with type array and %s.", datatypeToString(r_operand->type));
-						c_error(msg, -1);
-					}
-					if (l_operand->array_member_type != r_operand->type) {
+					if (l_op_pair->array_type != r_operand->type) {
 						char msg[128];
 						sprintf(msg, "Invalid binary operation with operands of type %s-array and %s.",
 							datatypeToString(l_operand->array_member_type), datatypeToString(r_operand->type));
@@ -2702,72 +2525,182 @@ static void interpret_binary_expr(Node *operator, Stack *opstack, Stack *valstac
 					break;
 				case AST_IDENT:
 				{
-					ValPropPair *pair = r_operand->lvar_valproppair;
+					ValPropPair *r_op_pair = r_operand->lvar_valproppair;
 
-					switch (pair->type)
+					switch (r_op_pair->type)
 					{
 						case TYPE_INT:
-							if (!( (op == AST_ADD) || (op == AST_MUL) )) {
-								c_error("Invalid binary operation on operands with type array and \x1b[95mint\x1b[0m.", -1);
-							}
 						case TYPE_STRING:
 						case TYPE_FLOAT:
 						case TYPE_BOOL:
-							if (op != AST_ADD) {
+							if (l_op_pair->array_type != r_op_pair->type) {
 								char msg[128];
-								sprintf(msg, "Invalid binary operation on operands with type array and %s.", datatypeToString(r_operand->type));
-								c_error(msg, -1);
-							}
-							if (l_operand->array_member_type != pair->type) {
-								char msg[128];
-								sprintf(msg, "Invalid binary operation: Operands of type %s-array and %s.", datatypeToString(l_operand->array_member_type), datatypeToString(pair->type));
+								sprintf(msg, "Invalid binary operation with operands of type %s-array and %s.",
+									datatypeToString(l_operand->array_member_type), datatypeToString(r_operand->type));
 								c_error(msg, -1);
 							}
 							break;
 						case TYPE_ARRAY:
-							if (op != AST_ADD) {
-								c_error("Invalid binary operation on operand of type array and array.", -1);
-							}
-							if (l_operand->array_member_type != pair->array_type) {
+							if (l_op_pair->array_type != r_op_pair->array_type) {
 								char msg[128];
-								sprintf(msg, "Invalid binary operation: Operands of type %s-array and %s-array.",
-									datatypeToString(l_operand->array_member_type), datatypeToString(pair->array_type));
+								sprintf(msg, "Invalid binary operation with operands of type %s-array and %s-array.",
+									datatypeToString(l_op_pair->array_type), datatypeToString(r_op_pair->array_type));
 								c_error(msg, -1);
 							}
-							if (l_operand->array_dims != pair->array_dims) {
+							if (l_op_pair->array_dims != r_op_pair->array_dims) {
 								char msg[128];
 								sprintf(msg, "Invalid binary operation: Operands of %d-D array and %d-D array.",
-									l_operand->array_dims, pair->array_dims);
+									l_op_pair->array_dims, r_op_pair->array_dims);
 								c_error(msg, -1);
 							}
 							break;
-					}
-				}
-				break;
-				case AST_ARRAY:
-				{
-					if (op != AST_ADD) {
-						c_error("Invalid binary operation on operand of type array and array.", -1);
-					}
-					if (l_operand->array_member_type != r_operand->array_member_type) {
-						char msg[128];
-						sprintf(msg, "Invalid binary operation: Operands of type %s-array and %s-array.",
-							datatypeToString(l_operand->array_member_type), datatypeToString(r_operand->array_member_type));
-						c_error(msg, -1);
-					}
-					if (l_operand->array_dims != r_operand->array_dims) {
-						char msg[128];
-						sprintf(msg, "Invalid binary operation: Operands of %d-D array and %d-D array.",
-							l_operand->array_dims, r_operand->array_dims);
-						c_error(msg, -1);
 					}
 				}
 				break;
 			}
 			operator->result_type = TYPE_ARRAY;
-			push(opstack, l_operand);
+			push(opstack, operator);
+
+		}
+}
+
+static void interpret_binary_array_expr(Node *l_operand, Node *r_operand, Node *operator, Stack *opstack, Stack *valstack)
+{
+	int op = operator->type;
+	switch (r_operand->type)
+	{
+		case AST_INT:
+			if (!( (op == AST_ADD) || (op == AST_MUL) )) {
+				c_error("Invalid binary operation on operands with type array and \x1b[95mint\x1b[0m.", -1);
+			}
+
+			if (l_operand->array_member_type != r_operand->type) {
+				char msg[128];
+				sprintf(msg, "Invalid binary operation with operands of type %s-array and %s.",
+					datatypeToString(l_operand->array_member_type), datatypeToString(r_operand->type));
+				c_error(msg, -1);
+			}
+			break;
+		case AST_STRING:
+		case AST_FLOAT:
+		case AST_BOOL:
+			if (op != AST_ADD) {
+				char msg[128];
+				sprintf(msg, "Invalid binary operation on operands with type array and %s.", datatypeToString(r_operand->type));
+				c_error(msg, -1);
+			}
+			if (l_operand->array_member_type != r_operand->type) {
+				char msg[128];
+				sprintf(msg, "Invalid binary operation with operands of type %s-array and %s.",
+					datatypeToString(l_operand->array_member_type), datatypeToString(r_operand->type));
+				c_error(msg, -1);
+			}
+			break;
+		case AST_IDENT:
+		{
+			ValPropPair *pair = r_operand->lvar_valproppair;
+
+			switch (pair->type)
+			{
+				case TYPE_INT:
+					if (!( (op == AST_ADD) || (op == AST_MUL) )) {
+						c_error("Invalid binary operation on operands with type array and \x1b[95mint\x1b[0m.", -1);
+					}
+				case TYPE_STRING:
+				case TYPE_FLOAT:
+				case TYPE_BOOL:
+					if (op != AST_ADD) {
+						char msg[128];
+						sprintf(msg, "Invalid binary operation on operands with type array and %s.", datatypeToString(r_operand->type));
+						c_error(msg, -1);
+					}
+					if (l_operand->array_member_type != pair->type) {
+						char msg[128];
+						sprintf(msg, "Invalid binary operation: Operands of type %s-array and %s.", datatypeToString(l_operand->array_member_type), datatypeToString(pair->type));
+						c_error(msg, -1);
+					}
+					break;
+				case TYPE_ARRAY:
+					if (op != AST_ADD) {
+						c_error("Invalid binary operation on operand of type array and array.", -1);
+					}
+					if (l_operand->array_member_type != pair->array_type) {
+						char msg[128];
+						sprintf(msg, "Invalid binary operation: Operands of type %s-array and %s-array.",
+							datatypeToString(l_operand->array_member_type), datatypeToString(pair->array_type));
+						c_error(msg, -1);
+					}
+					if (l_operand->array_dims != pair->array_dims) {
+						char msg[128];
+						sprintf(msg, "Invalid binary operation: Operands of %d-D array and %d-D array.",
+							l_operand->array_dims, pair->array_dims);
+						c_error(msg, -1);
+					}
+					break;
+			}
 		}
 		break;
+		case AST_ARRAY:
+		{
+			if (op != AST_ADD) {
+				c_error("Invalid binary operation on operand of type array and array.", -1);
+			}
+			if (l_operand->array_member_type != r_operand->array_member_type) {
+				char msg[128];
+				sprintf(msg, "Invalid binary operation: Operands of type %s-array and %s-array.",
+					datatypeToString(l_operand->array_member_type), datatypeToString(r_operand->array_member_type));
+				c_error(msg, -1);
+			}
+			if ((l_operand->array_dims != r_operand->array_dims) && !(l_operand->array_dims == r_operand->array_dims+1)) {
+				char msg[128];
+				sprintf(msg, "Invalid binary operation: Operands of %d-D array and %d-D array.",
+					l_operand->array_dims, r_operand->array_dims);
+				c_error(msg, -1);
+			}
+		}
+		break;
+	}
+
+	operator->result_type = TYPE_ARRAY;
+	push(opstack, l_operand);
+}
+
+static void interpret_binary_idx_expr(Node *l_operand, Node *r_operand, Node *operator, Stack *opstack, Stack *valstack)
+{
+	if (l_operand->lvar_valproppair->array_type != r_operand->lvar_valproppair->array_type) {
+		c_error("Operands of binary operation must be of the same type.", -1);
+	}
+
+	operator->result_type = l_operand->lvar_valproppair->array_type;
+	push(opstack, l_operand);
+}
+
+static void interpret_binary_expr(Node *operator, Stack *opstack, Stack *valstack) {
+	Node *r_operand = (Node *) pop(opstack);
+	Node *l_operand = (Node *) pop(opstack);
+
+	if ((r_operand->type != l_operand->type) && !( (r_operand->type == AST_IDENT || r_operand->type == AST_ARRAY || r_operand->type == AST_IDX_ARRAY)
+				|| (l_operand->type == AST_IDENT || l_operand->type == AST_ARRAY || l_operand->type == AST_IDX_ARRAY) )) {
+				c_error("Operands of binary operation must be of the same type.", -1);
+	}
+
+	switch (l_operand->type)
+	{
+		case AST_INT:
+			interpret_binary_int_expr(l_operand->ival, r_operand, operator, opstack, valstack);
+			break;
+		case AST_STRING:
+			interpret_binary_string_expr(r_operand, operator, opstack, valstack);
+			break;
+		case AST_IDENT:
+			interpret_binary_ident_expr(l_operand, r_operand, operator, opstack, valstack);
+			break;
+		case AST_ARRAY:
+			interpret_binary_array_expr(l_operand, r_operand, operator, opstack, valstack);
+			break;
+		case AST_IDX_ARRAY:
+			interpret_binary_idx_expr(l_operand, r_operand, operator, opstack, valstack);
+			break;
 	}
 }
 
