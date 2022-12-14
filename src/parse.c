@@ -2149,7 +2149,7 @@ static void checkArraySize(ValPropPair *pair, Node *array, int depth)
 		pair->array_size[depth] = array->array_size;
 	} else {
 		if (pair->array_size[depth] > 0) {
-			if (pair->array_size[depth] != array->array_size) {
+			if (pair->array_size[depth] < array->array_size) {
 				char msg[128];
 				sprintf(msg, "Array assignment of size %ld to array %s with set size %d.",
 					array->array_size, pair->var_name, pair->array_size[depth]);
@@ -2274,8 +2274,17 @@ static void interpret_assignment_expr(Node *expr, Stack *opstack, Stack *valstac
 									ident_pair->array_dims, pair->array_dims);
 								c_error(msg, -1);
 							}
+
+							for (int i = 0; i < ident_pair->array_dims; i++) {
+								if (ident_pair->array_size[i] != pair->array_size[i]) {
+									char msg[128];
+									sprintf(msg, "Invalid assignment of array with size %d to array with size %d.",
+										ident_pair->array_size[i], pair->array_size[i]);
+									c_error(msg, -1);
+								}
+							}
+
 							pair->status = 1;
-							pair->array_size = ident_pair->array_size;
 							break;
 					}
 				}
@@ -2298,8 +2307,6 @@ static void interpret_assignment_expr(Node *expr, Stack *opstack, Stack *valstac
 
 				checkArraySize(pair, rhs, 0);
 
-				pair->array_elems = rhs->array_elems;
-				pair->array_size[0] = rhs->array_size;
 				pair->status = 1;
 				break;
 			case AST_IDX_ARRAY:

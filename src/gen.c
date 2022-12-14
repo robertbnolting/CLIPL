@@ -535,19 +535,28 @@ static void emit_assign(Node *n)
 
 static void emit_array_assign(Node *var, Node *array)
 {
+	emit_expr(var);
+
 	if (array->type == AST_ARRAY || array->type == AST_IDENT) {
 		size_t member_sz = 0;
 		int *members = getArrayMembers(array, &member_sz);
 
-		if (var->type == AST_DECLARATION) { 	// TODO: stack-based storage ONLY for constant arrays -- otherwise heap!!!
-			stack_offset += 4 * member_sz;
-			var->lvar_valproppair->loff = stack_offset;
-		} else if (var->type == AST_IDENT) {
+		int acc = 1;
+		for (int i = 0; i < var->lvar_valproppair->array_dims; i++) {
+			acc *= var->lvar_valproppair->array_size[i];
+		}
+
+		if (member_sz > acc) {
+			c_error("Invalid array assignment.", -1);
 		}
 
 		for (int i = 0; i < member_sz; i++) {
 			emit("mov dword [rbp-%d] %d", var->lvar_valproppair->loff-4 * i, members[i]);
 		}
+
+		var->lvar_valproppair->array_len = member_sz;
+		var->lvar_valproppair->array_elems = array->array_elems;
+
 	} else if (array->type == AST_IDX_ARRAY) {
 		ValPropPair *ref_array = array->lvar_valproppair;
 		Node *indexed_array;
@@ -572,7 +581,7 @@ static int *getArrayMembers(Node *array, size_t *n_members)
 		array_size = array->array_size;
 		array_elems = array->array_elems;
 	} else if (array->type == AST_IDENT) {
-		array_size = array->lvar_valproppair->array_size[0];
+		array_size = array->lvar_valproppair->array_len;
 		array_elems = array->lvar_valproppair->array_elems;
 	} else {
 		printf("Not implemented.\n");
@@ -748,6 +757,7 @@ static void emit_lvar(Node *n)
 		case AST_STRING:
 		default:
 			emit_load(n->lvar_valproppair->loff, "rbp", n->lvar_valproppair->type);
+			break;
 	}
 }
 
@@ -760,6 +770,21 @@ static void emit_declaration(Node *n)
 			n->lvar_valproppair->loff = stack_offset;
 			break;
 		case TYPE_ARRAY:
+		{
+			int acc = 1;
+			int i;
+			for (i = 0; i < n->v_array_dimensions; i++) {
+				if (n->varray_size[i] < 0) {
+					break;
+				}
+				acc *= n->varray_size[i];
+			}
+			if (i != n->v_array_dimensions) {
+			} else {
+				stack_offset += 4 * acc;
+				n->lvar_valproppair->loff = stack_offset;
+			}
+		}
 			break;
 		case TYPE_INT:
 		default:
@@ -834,24 +859,23 @@ static Node *do_array_arithmetic(Node *expr)
 	{
 	case AST_ADD:
 		Node *array = do_array_arithmetic(expr->left);
-		Node **elems;
-		size_t *size;
-	
+		Node ***elems = NULL;
+		size_t *len = NULL;
 
 		if (array->type == AST_ARRAY) {
-			elems = expr->array_elems;
-			size = &expr->array_size;
+			elems = &array->array_elems;
+			len = &array->array_size;
 		} else if (array->type == AST_IDENT) {
 			ValPropPair *pair = array->lvar_valproppair;
-			elems = pair->array_elems;
-			size = (size_t *) pair->array_size;
+			elems = &pair->array_elems;
+			len = &pair->array_len;
 		} else {
 			printf("Not implemented.\n");
 		}
 
-		elems = realloc(elems, ((*size)+1) * sizeof(Node*));
-		elems[*size] = expr->right;
-		(*size)++;
+		*elems = realloc(*elems, ((*len)+1) * sizeof(Node*));
+		(*elems)[*len] = expr->right;
+		(*len)++;
 
 		return array;
 	case AST_ARRAY:
