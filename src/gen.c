@@ -257,8 +257,8 @@ MnemNode *makeMnemNode(char *mnem)
 	return r;
 }
 
-// track vregs first definitions
 static void emitf(char *fmt, ...) {
+	// track vregs first definitions
 	static int *vregs = NULL;
 	static size_t vregs_sz = 0;
 
@@ -590,8 +590,8 @@ static void emit_array_assign(Node *var, Node *array)
 		}
 		emit_array_assign(var, indexed_array);
 	} else {
-		Node *new_array = do_array_arithmetic(array);
-		emit_array_assign(var, new_array);
+		Node *new_array = do_array_arithmetic(array, var);
+		//emit_array_assign(var, new_array);
 	}
 #undef pair
 }
@@ -646,12 +646,12 @@ static int **getArrayMembers(Node *array, size_t *n_members, int total_size, int
 	return members;
 }
 
-static Node *do_array_arithmetic(Node *expr)
+static Node *do_array_arithmetic(Node *expr, Node *var)
 {
 	switch (expr->type)
 	{
 	case AST_ADD:
-		Node *array = do_array_arithmetic(expr->left);
+		Node *array = do_array_arithmetic(expr->left, var);
 		Node ***elems = NULL;
 		size_t *len = NULL;
 		int dims = 0;
@@ -673,7 +673,29 @@ static Node *do_array_arithmetic(Node *expr)
 
 		// TODO: IDENT SUPPORT
 		if (expr->right->type == AST_IDENT) {
-			type = expr->right->lvar_valproppair->type;
+			int assign_off = var->lvar_valproppair->loff;
+
+			int l_off = array->lvar_valproppair->loff;
+			int r_off = expr->right->lvar_valproppair->loff;
+
+			size_t l_len = array->lvar_valproppair->array_len;
+			size_t r_len = expr->right->lvar_valproppair->array_len;
+
+			for (int i = l_off; i > l_off-(4*l_len); i -= 4) {
+				emit("mov dword vd%d [rbp-%d]", vregs_idx, i);
+				emit("mov dword [rbp-%d] vd%d", assign_off-(l_off-i), vregs_idx);
+			}
+
+			assign_off -= l_off;
+
+			for (int i = r_off; i > r_off-(4*r_len); i -= 4) {
+				emit("mov dword vd%d [rbp-%d]", vregs_idx, i);
+				emit("mov dword [rbp-%d] vd%d", assign_off-(r_off-i), vregs_idx);
+			}
+
+			vregs_idx++;
+
+			return NULL;
 		} else {
 			type = expr->right->type;
 		}
@@ -989,9 +1011,6 @@ static void op(Node *expr)
 		if (expr->result_type == TYPE_STRING) {
 			emit_string_arith_binop(expr);
 		}
-		if (expr->result_type == TYPE_ARRAY) {
-			expr = do_array_arithmetic(expr);
-		}
 		break;
 	case AST_GT:
 	case AST_LT:
@@ -1136,8 +1155,10 @@ static InterferenceNode **lva()
 			if (n->type == MOV) {
 				if (n->right->type == VIRTUAL_REG) {
 					live = addToLiveRange(n->right, live, &live_sz);
-					used_vregs[n->right->idx] = 1;
-					used_vregs_n++;
+					if (!used_vregs[n->right->idx]) {
+						used_vregs[n->right->idx] = 1;
+						used_vregs_n++;
+					}
 				} else if (n->right->type == BRACKET_EXPR) {
 					int saved = live_sz;
 					for (int i = 0; i < n->right->n_vregs_used; i++) {

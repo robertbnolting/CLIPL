@@ -68,6 +68,7 @@ typedef struct ValPropPair {
 	char *var_name;
 	int status;	// 0 -> Uninitialized, 1 -> Initialized, 2 -> MaybeInitialized, -1 -> Value not constant
 	int type;
+	struct Node *ref_node;
 	union {
 		int ival;
 		char *sval;
