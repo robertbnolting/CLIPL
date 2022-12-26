@@ -2197,7 +2197,7 @@ static void interpret_assignment_expr(Node *expr, Stack *opstack, Stack *valstac
 
 	if (lhs->type == AST_DECLARATION || lhs->type == AST_IDENT || lhs->type == AST_FIELD_ACCESS || lhs->type == AST_IDX_ARRAY) {
 		ValPropPair *pair;
-		if (lhs->type == AST_FIELD_ACCESS){
+		if (lhs->type == AST_FIELD_ACCESS) {
 			pair = searchValueStack(valstack, lhs->access_rlabel->name);
 			if (!pair) {
 				char msg[128];
@@ -2275,7 +2275,7 @@ static void interpret_assignment_expr(Node *expr, Stack *opstack, Stack *valstac
 							break;
 						case TYPE_ARRAY:
 							checkDataType(pair, TYPE_ARRAY);
-							if (ident_pair->array_dims != pair->array_dims) {
+							if ((ident_pair->array_dims != pair->array_dims) && pair->array_dims) {
 								char msg[128];
 								sprintf(msg, "Invalid assignment of %d-D array to %d-D array.",
 									ident_pair->array_dims, pair->array_dims);
@@ -2298,14 +2298,15 @@ static void interpret_assignment_expr(Node *expr, Stack *opstack, Stack *valstac
 				break;
 			case AST_ARRAY:
 				checkDataType(pair, TYPE_ARRAY);
-				if (pair->array_type != rhs->array_member_type) {
+
+				if ((pair->array_type != rhs->array_member_type) && rhs->array_member_type) {
 					char msg[128];
 					sprintf(msg, "Invalid assignment of '%s'-array to '%s'-array.",
 						datatypeToString(rhs->array_member_type), datatypeToString(pair->array_type));
 					c_error(msg, -1);
 				}
 
-				if (pair->array_dims != rhs->array_dims) {
+				if ((pair->array_dims != rhs->array_dims) && rhs->array_dims) {
 					char msg[128];
 					sprintf(msg, "Invalid assignment of %d-D array to %d-D array.",
 						rhs->array_dims, pair->array_dims);
@@ -2319,13 +2320,13 @@ static void interpret_assignment_expr(Node *expr, Stack *opstack, Stack *valstac
 			case AST_IDX_ARRAY:
 			{
 				if (pair->type == TYPE_ARRAY) {
-					if (pair->array_dims + rhs->ndim_index != rhs->lvar_valproppair->array_dims) {
+					if (pair->array_dims != rhs->lvar_valproppair->array_dims) {
 						char msg[128];
 						sprintf(msg, "Invalid assignment of %d-D array to %d-D array.",
 							rhs->ndim_index, pair->array_dims);
 						c_error(msg, -1);
 					}
-				} else if (rhs->ndim_index != rhs->lvar_valproppair->array_dims) {
+				} else if (rhs->lvar_valproppair->array_dims) {
 						char msg[128];
 						sprintf(msg, "Invalid assignment of %d-D array to non-array variable.",
 							rhs->ndim_index);
@@ -2574,7 +2575,7 @@ static void interpret_binary_array_expr(Node *l_operand, Node *r_operand, Node *
 				c_error("Invalid binary operation on operands with type array and \x1b[95mint\x1b[0m.", -1);
 			}
 
-			if (l_operand->array_member_type != r_operand->type) {
+			if ((l_operand->array_member_type != r_operand->type) && l_operand->array_member_type) {
 				char msg[128];
 				sprintf(msg, "Invalid binary operation with operands of type %s-array and %s.",
 					datatypeToString(l_operand->array_member_type), datatypeToString(r_operand->type));
@@ -2589,7 +2590,7 @@ static void interpret_binary_array_expr(Node *l_operand, Node *r_operand, Node *
 				sprintf(msg, "Invalid binary operation on operands with type array and %s.", datatypeToString(r_operand->type));
 				c_error(msg, -1);
 			}
-			if (l_operand->array_member_type != r_operand->type) {
+			if ((l_operand->array_member_type != r_operand->type) && l_operand->array_member_type) {
 				char msg[128];
 				sprintf(msg, "Invalid binary operation with operands of type %s-array and %s.",
 					datatypeToString(l_operand->array_member_type), datatypeToString(r_operand->type));
@@ -2614,7 +2615,7 @@ static void interpret_binary_array_expr(Node *l_operand, Node *r_operand, Node *
 						sprintf(msg, "Invalid binary operation on operands with type array and %s.", datatypeToString(r_operand->type));
 						c_error(msg, -1);
 					}
-					if (l_operand->array_member_type != pair->type) {
+					if ((l_operand->array_member_type != pair->type) && l_operand->array_member_type) {
 						char msg[128];
 						sprintf(msg, "Invalid binary operation: Operands of type %s-array and %s.", datatypeToString(l_operand->array_member_type), datatypeToString(pair->type));
 						c_error(msg, -1);
@@ -2624,13 +2625,13 @@ static void interpret_binary_array_expr(Node *l_operand, Node *r_operand, Node *
 					if (op != AST_ADD) {
 						c_error("Invalid binary operation on operand of type array and array.", -1);
 					}
-					if (l_operand->array_member_type != pair->array_type) {
+					if ((l_operand->array_member_type != pair->array_type) && l_operand->array_member_type) {
 						char msg[128];
 						sprintf(msg, "Invalid binary operation: Operands of type %s-array and %s-array.",
 							datatypeToString(l_operand->array_member_type), datatypeToString(pair->array_type));
 						c_error(msg, -1);
 					}
-					if (l_operand->array_dims != pair->array_dims) {
+					if ((l_operand->array_dims != pair->array_dims) && l_operand->array_dims) {
 						char msg[128];
 						sprintf(msg, "Invalid binary operation: Operands of %d-D array and %d-D array.",
 							l_operand->array_dims, pair->array_dims);
@@ -2645,13 +2646,15 @@ static void interpret_binary_array_expr(Node *l_operand, Node *r_operand, Node *
 			if (op != AST_ADD) {
 				c_error("Invalid binary operation on operand of type array and array.", -1);
 			}
-			if (l_operand->array_member_type != r_operand->array_member_type) {
+			if ((l_operand->array_member_type != r_operand->array_member_type) 
+				&& l_operand->array_member_type && r_operand->array_member_type) {
 				char msg[128];
 				sprintf(msg, "Invalid binary operation: Operands of type %s-array and %s-array.",
 					datatypeToString(l_operand->array_member_type), datatypeToString(r_operand->array_member_type));
 				c_error(msg, -1);
 			}
-			if ((l_operand->array_dims != r_operand->array_dims) && !(l_operand->array_dims == r_operand->array_dims+1)) {
+			if ((l_operand->array_dims != r_operand->array_dims) && !(l_operand->array_dims == r_operand->array_dims+1)
+				&& l_operand->array_dims && r_operand->array_dims) {
 				char msg[128];
 				sprintf(msg, "Invalid binary operation: Operands of %d-D array and %d-D array.",
 					l_operand->array_dims, r_operand->array_dims);
@@ -2751,6 +2754,12 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 			break;
 		case AST_ARRAY:
 		{
+			if (!expr->array_size) {
+				push(*opstack, expr);
+				interpret_expr(expr->successor, opstack, valstack);
+				break;
+			}
+
 			int member_type;
 			if (!(member_type = checkArrayMemberTypes(expr, *valstack))) {
 				c_error("Invalid array expression: all members must be of the same type.", -1);
@@ -2807,7 +2816,23 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 				}
 			}
 
-			expr->lvar_valproppair = pair;
+			int diff = pair->array_dims - expr->ndim_index;
+			if (diff > 0) {
+				Node **indexed_elems = pair->array_elems;
+				for (int i = 0; i < expr->ndim_index; i++) {
+					if (indexed_elems) {
+						indexed_elems = indexed_elems[expr->index_values[i]->ival]->array_elems;
+					} else {
+						break;
+					}
+				}
+
+				expr->lvar_valproppair = makeValPropPair(&(ValPropPair){expr->ia_label, 0, TYPE_ARRAY, .array_type=pair->array_type,
+									.array_dims=diff, .array_size=&pair->array_size[expr->ndim_index], .array_elems=indexed_elems, .ref_array=pair});
+			} else {
+				expr->lvar_valproppair = makeValPropPair(&(ValPropPair){expr->ia_label, 0, pair->array_type, .ref_array=pair});
+			}
+
 			push(*opstack, expr);
 			interpret_expr(expr->successor, opstack, valstack);
 			break;

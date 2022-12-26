@@ -83,6 +83,8 @@ typedef struct ValPropPair {
 		};
 		Vector record_vec;
 	};
+	// indexed array
+	struct ValPropPair *ref_array;
 	// generation
 	int loff;
 	char *asmlabel;
@@ -111,7 +113,7 @@ typedef struct Node {
 		struct {
 			size_t array_size;
 			struct Node **array_elems;
-			// only used in optimizer
+			// used in optimizer
 			int array_member_type;
 			int array_dims;
 			// used in generation

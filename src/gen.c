@@ -40,7 +40,6 @@ static void emit_func_prologue();
 static void emit_block();
 static void emit_expr();
 static void emit_literal();
-static void emit_populate_array();
 static void emit_declaration();
 static void emit_assign();
 static void emit_store();
@@ -49,7 +48,8 @@ static void emit_array_assign();
 
 static Node *do_array_arithmetic();
 
-static int *getArrayMembers();
+static int **getArrayMembers();
+static int get_idx_offset();
 
 static InterferenceNode **lva();
 static void optimize();
@@ -70,7 +70,7 @@ void set_output_file(FILE *fp)
 	outputbuf_sz = 0;
 }
 
-static char *make_label() {
+static char *_label() {
 	static int c = 0;
 	char *fmt = malloc(10);
 	sprintf(fmt, "L%d", c++);
@@ -487,17 +487,18 @@ static void emit_store(Node *n)
 {
 	switch (n->type)
 	{
+		int off;
 		case AST_DECLARATION:
 			switch (n->lvar_valproppair->type)
 			{
 				case TYPE_INT:
-					n->lvar_valproppair->loff = stack_offset;
 					stack_offset += 4;
+					n->lvar_valproppair->loff = stack_offset;
 					emit("mov [rbp-%d] vd%d", stack_offset, vregs_idx++);
 					break;
 				case TYPE_STRING:
-					n->lvar_valproppair->loff = stack_offset;
 					stack_offset += 10;
+					n->lvar_valproppair->loff = stack_offset;
 					emit("mov [rbp-%d] vw%d", stack_offset, vregs_idx-1);
 					emit("mov [rbp-%d] v%d", stack_offset+2, vregs_idx++);
 					break;
@@ -506,7 +507,7 @@ static void emit_store(Node *n)
 			}
 			break;
 		case AST_IDENT:
-			int off = n->lvar_valproppair->loff;
+			off = n->lvar_valproppair->loff;
 			switch (n->lvar_valproppair->type)
 			{
 				case TYPE_INT:
@@ -519,6 +520,13 @@ static void emit_store(Node *n)
 				default:
 					break;
 			}
+			break;
+		case AST_IDX_ARRAY:
+			off = get_idx_offset(n);
+			emit("mov [rbp+%d] v%d", off, vregs_idx++);
+			break;
+		default:
+			printf("Not implemented.\n");
 			break;
 	}
 }
@@ -535,44 +543,62 @@ static void emit_assign(Node *n)
 
 static void emit_array_assign(Node *var, Node *array)
 {
+#define pair (var->lvar_valproppair)
 	emit_expr(var);
 
 	if (array->type == AST_ARRAY || array->type == AST_IDENT) {
-		size_t member_sz = 0;
-		int *members = getArrayMembers(array, &member_sz);
-
-		int acc = 1;
-		for (int i = 0; i < var->lvar_valproppair->array_dims; i++) {
-			acc *= var->lvar_valproppair->array_size[i];
+		int total_size = 1;
+		for (int i = 0; i < pair->array_dims; i++) {
+			total_size *= pair->array_size[i];
 		}
 
-		if (member_sz > acc) {
+		size_t member_sz = 0;
+		int iter = 0;
+		int **members = getArrayMembers(array, &member_sz, total_size, pair->array_size[pair->array_dims-1], pair->array_dims, &iter, total_size * 4);
+
+		if (member_sz > total_size) {
 			c_error("Invalid array assignment.", -1);
 		}
 
-		for (int i = 0; i < member_sz; i++) {
-			emit("mov dword [rbp-%d] %d", var->lvar_valproppair->loff-4 * i, members[i]);
+		int counter = 1;
+		int acc = 1;
+
+		for (int j = 1; j < pair->array_dims; j++) {
+			acc *= pair->array_size[j];
 		}
 
-		var->lvar_valproppair->array_len = member_sz;
-		var->lvar_valproppair->array_elems = array->array_elems;
+		pair->array_len = 0;
+
+		for (int i = 0; i < member_sz; i++) {
+			emit("mov dword [rbp-%d] %d", members[i][1]+(pair->loff-members[0][1]), members[i][0]);
+
+			if (counter < acc) {
+				counter++;
+			} else {
+				pair->array_len++;
+				counter = 1;
+			}
+		}
+
+		pair->array_elems = array->array_elems;
 
 	} else if (array->type == AST_IDX_ARRAY) {
-		ValPropPair *ref_array = array->lvar_valproppair;
+		ValPropPair *ref_array = array->lvar_valproppair->ref_array;
 		Node *indexed_array;
 		for (int i = 0; i < array->ndim_index; i++) {
 			indexed_array = ref_array->array_elems[array->index_values[i]->ival];
 		}
 		emit_array_assign(var, indexed_array);
-	} else { 	// arithmetic operator
+	} else {
 		Node *new_array = do_array_arithmetic(array);
 		emit_array_assign(var, new_array);
 	}
+#undef pair
 }
 
-static int *getArrayMembers(Node *array, size_t *n_members)
+static int **getArrayMembers(Node *array, size_t *n_members, int total_size, int last_size, int dims, int *n_iter, size_t offset)
 {
-	int *members = NULL;
+	int **members = NULL;
 
 	size_t array_size;
 	Node **array_elems;
@@ -587,51 +613,137 @@ static int *getArrayMembers(Node *array, size_t *n_members)
 		printf("Not implemented.\n");
 	}
 
+	if (dims == 1) {
+		(*n_iter)++;
+	}
+
 	for (int i = 0; i < array_size; i++) {
-		switch (array_elems[i]->type)
-		{
-			case AST_ARRAY:
+		if (dims > 1) {
 				size_t ret_sz = 0;
-				int *ret = getArrayMembers(array_elems[i], &ret_sz);
+				int **ret = getArrayMembers(array_elems[i], &ret_sz, total_size, last_size, dims-1, n_iter, 4 * (total_size - ((*n_iter) * last_size)));
+
 				if (ret) {
-					members = realloc(members, (*n_members+ret_sz) * sizeof(int));
-					memcpy(&members[*n_members], ret, ret_sz * sizeof(int));
+					members = realloc(members, (*n_members+ret_sz) * sizeof(int*));
+					memcpy(&members[*n_members], ret, ret_sz * sizeof(int*));
 					*n_members += ret_sz;
 					free(ret);
 				}
-				break;
-			case AST_INT:
-			default:
-				members = realloc(members, (*n_members+1) * sizeof(int));
-				members[(*n_members)++] = array_elems[i]->ival;
-				break;
+		} else {
+			switch (array_elems[i]->type) 
+			{
+				case AST_INT:
+				default:
+					members = realloc(members, (*n_members+1) * sizeof(int*));
+					members[*n_members] = malloc(sizeof(int[2]));
+					int pair[2] = {array_elems[i]->ival, offset};
+					memcpy(members[(*n_members)++], &pair[0], 2 * sizeof(int));
+					offset -= 4;
+					break;
+			}
 		}
 	}
 
 	return members;
 }
 
-/*
-static void emit_populate_array(Node *var, Node *array)
+static Node *do_array_arithmetic(Node *expr)
 {
-	emit_expr(var);
-	int sz = push_members(array);
+	switch (expr->type)
+	{
+	case AST_ADD:
+		Node *array = do_array_arithmetic(expr->left);
+		Node ***elems = NULL;
+		size_t *len = NULL;
+		int dims = 0;
 
-	int sz_reg = vregs_idx;
-	emit("mov v%d %ld", vregs_idx++, sz);
-	int array_reg = vregs_idx;
-	emit("mov v%d %s", vregs_idx++, var->lvar_valproppair->asmlabel);
-	int acc_reg = vregs_idx;
-	emit("mov v%d 0", vregs_idx++);
+		if (array->type == AST_ARRAY) {
+			elems = &array->array_elems;
+			len = &array->array_size;
+			dims = array->array_dims;
+		} else if (array->type == AST_IDENT) {
+			ValPropPair *pair = array->lvar_valproppair;
+			elems = &pair->array_elems;
+			len = &pair->array_len;
+			dims = pair->array_dims;
+		} else {
+			printf("Not implemented.\n");
+		}
 
-	char *loop_label = make_label();
-	emit_noindent("%s:", loop_label);
-	emit("pop qword [v%d+(v%d*4)]", array_reg, acc_reg);
-	emit("inc v%d", acc_reg);
-	emit("cmp v%d v%d", acc_reg, sz_reg);
-	emit("jnz %s", loop_label);
+		int type;
+
+		// TODO: IDENT SUPPORT
+		if (expr->right->type == AST_IDENT) {
+			type = expr->right->lvar_valproppair->type;
+		} else {
+			type = expr->right->type;
+		}
+
+		switch (type)
+		{
+		case AST_ARRAY:
+			if (dims > expr->right->array_dims) {
+				*elems = realloc(*elems, ((*len)+1) * sizeof(Node*));
+				(*elems)[*len] = expr->right;
+				(*len)++;
+			} else {
+				for (int i = 0; i < expr->right->array_size; i++) {
+					*elems = realloc(*elems, ((*len)+1) * sizeof(Node*));
+					(*elems)[*len] = expr->right->array_elems[i];
+					(*len)++;
+				}
+			}
+			break;
+		case AST_INT:
+		case AST_STRING:
+		case AST_FLOAT:
+		case AST_BOOL:
+			*elems = realloc(*elems, ((*len)+1) * sizeof(Node*));
+			(*elems)[*len] = expr->right;
+			(*len)++;
+			break;
+		default:
+			printf("Not implemented.\n");
+			break;
+		}
+
+		/*
+		if (array->type == AST_IDENT) {
+			array->lvar_valproppair->array_size[0] = (int) *len;
+		} */
+		return array;
+	case AST_ARRAY:
+		return expr;
+	case AST_IDENT:
+		return expr;
+	default:
+		return NULL;
+		break;
+	}
 }
-*/
+
+
+
+static Node *getArrayMemberByIndex(Node **array, int idx)
+{
+	if (!array[0]) {
+		return NULL;
+	}
+
+	if (array[0]->type == AST_ARRAY) {
+		Node *elem = getArrayMemberByIndex(array[0]->array_elems, idx);
+		if (!elem) {
+			return getArrayMemberByIndex(&array[1], idx-1);
+		} else {
+			return elem;
+		}
+	} else {
+		if (idx == 0) {
+			return array[0];
+		} else {
+			return getArrayMemberByIndex(&array[1], idx-1);
+		}
+	}
+}
 
 static char *getArrayElems(Node *expr, int member_type)
 {
@@ -694,7 +806,7 @@ static void emit_literal(Node *expr)
 			break;
 		case AST_STRING:
 			if (!expr->slabel) {
-				expr->slabel = make_label();
+				expr->slabel = _label();
 				emit_noindent("\nsection .data");
 				emit("%s db %s", expr->slabel, expr->sval);
 				emit_noindent("\nsection .text");
@@ -709,10 +821,9 @@ static void emit_literal(Node *expr)
 	}
 }
 
-// TODO: Port all AST_ARRAY properties to registers
-static void emit_idx_array(Node *n)
+static int get_idx_offset(Node *n)
 {
-	ValPropPair *ref_array = n->lvar_valproppair; // TODO: check in parse.c if {AST_IDX_ARRAY}->lvar_valproppair is necessary
+	ValPropPair *ref_array = n->lvar_valproppair->ref_array; // TODO: check in parse.c if {AST_IDX_ARRAY}->lvar_valproppair is necessary
 	int array_offset = 0;
 	for (int i = 0; i < n->ndim_index; i++) {
 		int sizeacc = 1;
@@ -722,10 +833,16 @@ static void emit_idx_array(Node *n)
 		array_offset += n->index_values[i]->ival * sizeacc;
 	}
 
-	if (ref_array->array_dims == n->ndim_index) {
-		emit("mov vd%d [rbp-%d]", vregs_idx, ref_array->loff - 4 * array_offset);
-	} else {
-		emit("mov v%d rbp-%d", vregs_idx, ref_array->loff + array_offset);
+	return ref_array->loff - 4 * array_offset;
+}
+
+// TODO: Port all AST_ARRAY properties to registers
+static void emit_idx_array(Node *n)
+{
+	n->lvar_valproppair->loff = get_idx_offset(n);
+
+	if (!n->lvar_valproppair->array_dims) {
+		emit("mov vd%d [rbp-%d]", vregs_idx, n->lvar_valproppair->loff);
 	}
 }
 
@@ -771,18 +888,20 @@ static void emit_declaration(Node *n)
 			break;
 		case TYPE_ARRAY:
 		{
-			int acc = 1;
-			int i;
-			for (i = 0; i < n->v_array_dimensions; i++) {
-				if (n->varray_size[i] < 0) {
-					break;
+			if (!n->lvar_valproppair->loff) {
+				int acc = 1;
+				int i;
+				for (i = 0; i < n->v_array_dimensions; i++) {
+					if (n->varray_size[i] < 0) {
+						break;
+					}
+					acc *= n->varray_size[i];
 				}
-				acc *= n->varray_size[i];
-			}
-			if (i != n->v_array_dimensions) {
-			} else {
-				stack_offset += 4 * acc;
-				n->lvar_valproppair->loff = stack_offset;
+				if (i != n->v_array_dimensions) {
+				} else {
+					stack_offset += 4 * acc;
+					n->lvar_valproppair->loff = stack_offset;
+				}
 			}
 		}
 			break;
@@ -805,17 +924,11 @@ static void emit_int_arith_binop(Node *expr)
 
 	emit_expr(expr->left);
 	int saved_idx = vregs_idx;
-	//emit("mov v%d, v%d", vregs_idx+1, vregs_idx);
-	//vregs_idx += 2;
-	//vregs_count++;
 	vregs_idx++;
 	vregs_count++;
 	emit_expr(expr->right);
-	//emit("mov v%d, v%d", vregs_idx+1, vregs_idx);
 
 	emit("%s v%d v%d", op, vregs_idx, saved_idx);
-	//emit("%s v%d, v%d", op, vregs_idx-1, vregs_idx+1);
-	//vregs_idx -= 1;
 }
 
 static void emit_string_arith_binop(Node *expr)
@@ -830,7 +943,7 @@ static void emit_string_arith_binop(Node *expr)
 	int string2_len = vregs_idx-1;
 	vregs_idx++;
 
-	char *loop_label = make_label();
+	char *loop_label = _label();
 
 	int acc = vregs_idx++;
 	emit("mov v%d 0", acc);
@@ -851,40 +964,6 @@ static void emit_string_arith_binop(Node *expr)
 	emit("mov v%d v%d", vregs_idx++, string1_len);
 	emit("mov v%d v%d", vregs_idx, string1);
 
-}
-
-static Node *do_array_arithmetic(Node *expr)
-{
-	switch (expr->type)
-	{
-	case AST_ADD:
-		Node *array = do_array_arithmetic(expr->left);
-		Node ***elems = NULL;
-		size_t *len = NULL;
-
-		if (array->type == AST_ARRAY) {
-			elems = &array->array_elems;
-			len = &array->array_size;
-		} else if (array->type == AST_IDENT) {
-			ValPropPair *pair = array->lvar_valproppair;
-			elems = &pair->array_elems;
-			len = &pair->array_len;
-		} else {
-			printf("Not implemented.\n");
-		}
-
-		*elems = realloc(*elems, ((*len)+1) * sizeof(Node*));
-		(*elems)[*len] = expr->right;
-		(*len)++;
-
-		return array;
-	case AST_ARRAY:
-		return expr;
-	case AST_IDENT:
-		return expr;
-	default:
-		break;
-	}
 }
 
 static void emit_comp_binop(Node *expr)
@@ -1410,15 +1489,3 @@ static void optimize()
 
 	assign_registers(graph);
 }
-
-
-
-
-
-
-
-
-
-
-
-
