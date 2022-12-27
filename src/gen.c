@@ -563,8 +563,7 @@ static int emit_offset_assign(int array_dims, int *array_size, size_t *array_len
 		for (int i = 0; i < array->ndim_index; i++) {
 			indexed_array = ref_array->array_elems[array->index_values[i]->ival];
 		}
-		// TODO change function
-		//emit_array_assign(var, indexed_array);
+		emit_offset_assign(array_dims, array_size, array_len, array_elems, loff, indexed_array);
 	} else {
 		int total_size = 1;
 		for (int i = 0; i < array_dims; i++) {

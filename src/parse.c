@@ -2676,7 +2676,7 @@ static void interpret_binary_idx_expr(Node *l_operand, Node *r_operand, Node *op
 		c_error("Operands of binary operation must be of the same type.", -1);
 	}
 
-	operator->result_type = l_operand->lvar_valproppair->array_type;
+	operator->result_type = l_operand->lvar_valproppair->type;
 	push(opstack, l_operand);
 }
 
