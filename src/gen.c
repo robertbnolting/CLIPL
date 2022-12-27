@@ -7,7 +7,7 @@
 #include "gen.h"
 #include "error.h"
 
-#define PSEUDO_ASM_OUT 0
+#define PSEUDO_ASM_OUT 1
 
 #define MAX_REGISTER_COUNT 13
 
@@ -45,8 +45,9 @@ static void emit_assign();
 static void emit_store();
 static void emit_lvar();
 static void emit_array_assign();
+static void emit_offset_assign();
 
-static Node *do_array_arithmetic();
+static size_t do_array_arithmetic();
 
 static int **getArrayMembers();
 static int get_idx_offset();
@@ -546,15 +547,33 @@ static void emit_array_assign(Node *var, Node *array)
 #define pair (var->lvar_valproppair)
 	emit_expr(var);
 
-	if (array->type == AST_ARRAY || array->type == AST_IDENT) {
+	if (array->type == AST_ARRAY || array->type == AST_IDENT || array->type == AST_IDX_ARRAY) {
+		emit_offset_assign(pair->array_dims, pair->array_size, &pair->array_len, &pair->array_elems, pair->loff, array);
+	} else {
+		do_array_arithmetic(array, var);
+	}
+#undef pair
+}
+
+static void emit_offset_assign(int array_dims, int *array_size, size_t *array_len, Node ***array_elems, int loff, Node *array)
+{
+	if (array->type == AST_IDX_ARRAY) {
+		ValPropPair *ref_array = array->lvar_valproppair->ref_array;
+		Node *indexed_array;
+		for (int i = 0; i < array->ndim_index; i++) {
+			indexed_array = ref_array->array_elems[array->index_values[i]->ival];
+		}
+		// TODO change function
+		//emit_array_assign(var, indexed_array);
+	} else {
 		int total_size = 1;
-		for (int i = 0; i < pair->array_dims; i++) {
-			total_size *= pair->array_size[i];
+		for (int i = 0; i < array_dims; i++) {
+			total_size *= array_size[i];
 		}
 
 		size_t member_sz = 0;
 		int iter = 0;
-		int **members = getArrayMembers(array, &member_sz, total_size, pair->array_size[pair->array_dims-1], pair->array_dims, &iter, total_size * 4);
+		int **members = getArrayMembers(array, &member_sz, total_size, array_size[array_dims-1], array_dims, &iter, total_size * 4);
 
 		if (member_sz > total_size) {
 			c_error("Invalid array assignment.", -1);
@@ -563,37 +582,25 @@ static void emit_array_assign(Node *var, Node *array)
 		int counter = 1;
 		int acc = 1;
 
-		for (int j = 1; j < pair->array_dims; j++) {
-			acc *= pair->array_size[j];
+		for (int j = 1; j < array_dims; j++) {
+			acc *= array_size[j];
 		}
 
-		pair->array_len = 0;
+		*array_len = 0;
 
 		for (int i = 0; i < member_sz; i++) {
-			emit("mov dword [rbp-%d] %d", members[i][1]+(pair->loff-members[0][1]), members[i][0]);
+			emit("mov dword [rbp-%d] %d", members[i][1]+(loff-members[0][1]), members[i][0]);
 
 			if (counter < acc) {
 				counter++;
 			} else {
-				pair->array_len++;
+				(*array_len)++;
 				counter = 1;
 			}
 		}
 
-		pair->array_elems = array->array_elems;
-
-	} else if (array->type == AST_IDX_ARRAY) {
-		ValPropPair *ref_array = array->lvar_valproppair->ref_array;
-		Node *indexed_array;
-		for (int i = 0; i < array->ndim_index; i++) {
-			indexed_array = ref_array->array_elems[array->index_values[i]->ival];
-		}
-		emit_array_assign(var, indexed_array);
-	} else {
-		Node *new_array = do_array_arithmetic(array, var);
-		//emit_array_assign(var, new_array);
+		*array_elems = array->array_elems;
 	}
-#undef pair
 }
 
 static int **getArrayMembers(Node *array, size_t *n_members, int total_size, int last_size, int dims, int *n_iter, size_t offset)
@@ -610,7 +617,17 @@ static int **getArrayMembers(Node *array, size_t *n_members, int total_size, int
 		array_size = array->lvar_valproppair->array_len;
 		array_elems = array->lvar_valproppair->array_elems;
 	} else {
-		printf("Not implemented.\n");
+		switch (array->type)
+		{
+		case AST_INT:
+			array_size = 1;
+			array_elems = malloc(sizeof(Node*));
+			array_elems[0] = array;
+			break;
+		default:
+			printf("Not implemented.\n");
+			break;
+		}
 	}
 
 	if (dims == 1) {
@@ -646,12 +663,12 @@ static int **getArrayMembers(Node *array, size_t *n_members, int total_size, int
 	return members;
 }
 
-static Node *do_array_arithmetic(Node *expr, Node *var)
+static size_t do_array_arithmetic(Node *expr, Node *var)
 {
 	switch (expr->type)
 	{
 	case AST_ADD:
-		Node *array = do_array_arithmetic(expr->left, var);
+		/*
 		Node ***elems = NULL;
 		size_t *len = NULL;
 		int dims = 0;
@@ -670,36 +687,19 @@ static Node *do_array_arithmetic(Node *expr, Node *var)
 		}
 
 		int type;
+		*/
+		int assign_off = var->lvar_valproppair->loff;
+		size_t n = do_array_arithmetic(expr->left, var);
 
-		// TODO: IDENT SUPPORT
-		if (expr->right->type == AST_IDENT) {
-			int assign_off = var->lvar_valproppair->loff;
+		assign_off -= n * 4;
 
-			int l_off = array->lvar_valproppair->loff;
-			int r_off = expr->right->lvar_valproppair->loff;
+#define pair (var->lvar_valproppair)
+		emit_offset_assign(pair->array_dims, pair->array_size, &pair->array_len, &pair->array_elems, assign_off, expr->right);
 
-			size_t l_len = array->lvar_valproppair->array_len;
-			size_t r_len = expr->right->lvar_valproppair->array_len;
+		return n + pair->array_len;
 
-			for (int i = l_off; i > l_off-(4*l_len); i -= 4) {
-				emit("mov dword vd%d [rbp-%d]", vregs_idx, i);
-				emit("mov dword [rbp-%d] vd%d", assign_off-(l_off-i), vregs_idx);
-			}
-
-			assign_off -= l_off;
-
-			for (int i = r_off; i > r_off-(4*r_len); i -= 4) {
-				emit("mov dword vd%d [rbp-%d]", vregs_idx, i);
-				emit("mov dword [rbp-%d] vd%d", assign_off-(r_off-i), vregs_idx);
-			}
-
-			vregs_idx++;
-
-			return NULL;
-		} else {
-			type = expr->right->type;
-		}
-
+#undef pair
+		/*
 		switch (type)
 		{
 		case AST_ARRAY:
@@ -728,18 +728,17 @@ static Node *do_array_arithmetic(Node *expr, Node *var)
 			break;
 		}
 
-		/*
-		if (array->type == AST_IDENT) {
-			array->lvar_valproppair->array_size[0] = (int) *len;
-		} */
 		return array;
+		*/
 	case AST_ARRAY:
-		return expr;
+		emit_array_assign(var, expr);
+		return expr->array_size;
 	case AST_IDENT:
-		return expr;
+		emit_array_assign(var, expr);
+		return expr->lvar_valproppair->array_len;
 	default:
+		printf("Not implemented.\n");
 		return NULL;
-		break;
 	}
 }
 

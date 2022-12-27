@@ -2282,6 +2282,8 @@ static void interpret_assignment_expr(Node *expr, Stack *opstack, Stack *valstac
 								c_error(msg, -1);
 							}
 
+							// TODO: delete
+							/*
 							for (int i = 0; i < ident_pair->array_dims; i++) {
 								if (ident_pair->array_size[i] != pair->array_size[i]) {
 									char msg[128];
@@ -2290,6 +2292,7 @@ static void interpret_assignment_expr(Node *expr, Stack *opstack, Stack *valstac
 									c_error(msg, -1);
 								}
 							}
+							*/
 
 							pair->status = 1;
 							break;
@@ -2560,8 +2563,7 @@ static void interpret_binary_ident_expr(Node *l_operand, Node *r_operand, Node *
 				break;
 			}
 			operator->result_type = TYPE_ARRAY;
-			push(opstack, operator);
-
+			push(opstack, l_operand);
 		}
 }
 
