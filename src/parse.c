@@ -301,7 +301,7 @@ static const char *datatypeToString(int type)
 		case TYPE_ARRAY:
 			return "\x1b[95marray\x1b[0m";
 		default:
-			return NULL;
+			return "Unknown";
 	}
 }
 
