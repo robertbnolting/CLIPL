@@ -2326,7 +2326,7 @@ static void interpret_assignment_expr(Node *expr, Stack *opstack, Stack *valstac
 					if (pair->array_dims != rhs->lvar_valproppair->array_dims) {
 						char msg[128];
 						sprintf(msg, "Invalid assignment of %d-D array to %d-D array.",
-							rhs->ndim_index, pair->array_dims);
+							rhs->lvar_valproppair->array_dims, pair->array_dims);
 						c_error(msg, -1);
 					}
 				} else if (rhs->lvar_valproppair->array_dims) {

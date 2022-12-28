@@ -548,7 +548,11 @@ static int emit_array_assign(Node *var, Node *array)
 	emit_expr(var);
 
 	if (array->type == AST_ARRAY || array->type == AST_IDENT || array->type == AST_IDX_ARRAY) {
-		return emit_offset_assign(pair->array_dims, pair->array_size, &pair->array_len, &pair->array_elems, pair->loff, array);
+		if (var->type == AST_IDX_ARRAY) {
+			return emit_offset_assign(pair->ref_array->array_dims, pair->ref_array->array_size, &pair->ref_array->array_len, &pair->ref_array->array_elems, pair->loff, array);
+		} else {
+			return emit_offset_assign(pair->array_dims, pair->array_size, &pair->array_len, &pair->array_elems, pair->loff, array);
+		}
 	} else {
 		return do_array_arithmetic(array, var);
 	}
@@ -559,11 +563,13 @@ static int emit_offset_assign(int array_dims, int *array_size, size_t *array_len
 {
 	if (array->type == AST_IDX_ARRAY) {
 		ValPropPair *ref_array = array->lvar_valproppair->ref_array;
-		Node *indexed_array;
-		for (int i = 0; i < array->ndim_index; i++) {
-			indexed_array = ref_array->array_elems[array->index_values[i]->ival];
+		Node *indexed_array = ref_array->array_elems[array->index_values[0]->ival];
+
+		for (int i = 1; i < array->ndim_index; i++) {
+			indexed_array = indexed_array->array_elems[array->index_values[i]->ival];
 		}
-		emit_offset_assign(array_dims, array_size, array_len, array_elems, loff, indexed_array);
+
+		return emit_offset_assign(array_dims, array_size, array_len, array_elems, loff, indexed_array);
 	} else {
 		int total_size = 1;
 		for (int i = 0; i < array_dims; i++) {
@@ -601,7 +607,11 @@ static int emit_offset_assign(int array_dims, int *array_size, size_t *array_len
 
 		*array_elems = realloc(*array_elems, sizeof(Node *) * *array_len);
 		if (array->type == AST_ARRAY) {
-			memcpy(&((*array_elems)[*array_len - toplevel_len]), array->array_elems, sizeof(Node *) * toplevel_len);
+			if (array_dims != array->array_dims) {
+				memcpy(&((*array_elems)[*array_len - toplevel_len]), &array, sizeof(Node *) * toplevel_len);
+			} else {
+				memcpy(&((*array_elems)[*array_len - toplevel_len]), array->array_elems, sizeof(Node *) * toplevel_len);
+			}
 		} else if (array->type == AST_IDENT) {
 			memcpy(&((*array_elems)[*array_len - toplevel_len]), array->lvar_valproppair->array_elems, sizeof(Node *) * toplevel_len);
 		} else {
@@ -701,8 +711,8 @@ static int do_array_arithmetic(Node *expr, Node *var)
 
 #undef pair
 	case AST_ARRAY:
-		return emit_array_assign(var, expr);
 	case AST_IDENT:
+	case AST_IDX_ARRAY:
 		return emit_array_assign(var, expr);
 	default:
 		printf("Not implemented.\n");
