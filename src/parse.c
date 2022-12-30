@@ -10,6 +10,8 @@
 
 #include "gen.h"
 
+#define DYNAMIC_ARRAYS_ENABLED 0
+
 #define AST_OUTPUT 0
 #define CFG_OUTPUT 0
 #define SYM_OUTPUT 0
@@ -1474,7 +1476,11 @@ static Node *read_declaration_expr(int no_assignment)
 						#undef s
 						expect(']', "");
 					} else if (tok->class == ']') {
+#if DYNAMIC_ARRAYS_ENABLED
 						array_size[array_dims] = -1;
+#else
+						c_error("Invalid expression: Dynamic arrays are disabled.", -1);
+#endif
 					}
 					array_dims += 1;
 				} else {
