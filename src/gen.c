@@ -582,7 +582,7 @@ static int emit_offset_assign(int array_dims, int *array_size, size_t *array_len
 		int **members = getArrayMembers(array, &member_sz, total_size, array_size[array_dims-1], &iter, total_size * 4);
 
 		if (member_sz > total_size) {
-			c_error("Invalid array assignment.", -1);
+			c_error("Invalid array assignment: Not enough space in array.", -1);
 		}
 
 		int counter = 1;
@@ -704,7 +704,7 @@ static int do_array_arithmetic(Node *expr, Node *var)
 
 		int ret = n + emit_offset_assign(pair->array_dims, pair->array_size, &pair->array_len, &pair->array_elems, assign_off, expr->right);
 		if (ret > total_size) {
-			c_error("Invalid array assignment.", -1);
+			c_error("Invalid array assignment: Not enough space in array.", -1);
 		}
 
 		return ret;
