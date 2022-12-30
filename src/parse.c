@@ -2414,7 +2414,7 @@ static void interpret_binary_int_expr(int l, Node *r_operand, Node *operator, St
 {
 	int r;
 	if (r_operand->type != AST_INT) {
-		if (r_operand->type == AST_IDENT) {
+		if (r_operand->type == AST_IDENT || r_operand->type == AST_IDX_ARRAY) {
 			ValPropPair *ident_pair = r_operand->lvar_valproppair;
 
 			if (ident_pair->type != TYPE_INT) {
@@ -2678,12 +2678,23 @@ static void interpret_binary_array_expr(Node *l_operand, Node *r_operand, Node *
 
 static void interpret_binary_idx_expr(Node *l_operand, Node *r_operand, Node *operator, Stack *opstack, Stack *valstack)
 {
-	if (l_operand->lvar_valproppair->array_type != r_operand->lvar_valproppair->array_type) {
-		c_error("Operands of binary operation must be of the same type.", -1);
+	switch (r_operand->type)
+	{
+		case AST_INT:
+			interpret_binary_int_expr(r_operand->ival, l_operand, operator, opstack, valstack);
+			break;
+		case AST_ARRAY:
+			interpret_binary_array_expr(l_operand, r_operand, operator, opstack, valstack);
+			break;
 	}
 
-	operator->result_type = l_operand->lvar_valproppair->type;
-	push(opstack, l_operand);
+	/*
+	if (l_operand->lvar_valproppair->array_type != r_operand->lvar_valproppair->array_type) {
+		c_error("Operands of binary operation must be of the same type.", -1);
+	} */
+
+	//operator->result_type = l_operand->lvar_valproppair->type;
+	//push(opstack, l_operand);
 }
 
 static void interpret_binary_expr(Node *operator, Stack *opstack, Stack *valstack) {
@@ -2835,10 +2846,10 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 					}
 				}
 
-				expr->lvar_valproppair = makeValPropPair(&(ValPropPair){expr->ia_label, 0, TYPE_ARRAY, .array_type=pair->array_type,
+				expr->lvar_valproppair = makeValPropPair(&(ValPropPair){expr->ia_label, 1, TYPE_ARRAY, .array_type=pair->array_type,
 									.array_dims=diff, .array_size=&pair->array_size[expr->ndim_index], .array_elems=indexed_elems, .ref_array=pair});
 			} else {
-				expr->lvar_valproppair = makeValPropPair(&(ValPropPair){expr->ia_label, 0, pair->array_type, .ref_array=pair});
+				expr->lvar_valproppair = makeValPropPair(&(ValPropPair){expr->ia_label, 1, pair->array_type, .ref_array=pair});
 			}
 
 			push(*opstack, expr);
