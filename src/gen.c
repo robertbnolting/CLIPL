@@ -71,7 +71,7 @@ void set_output_file(FILE *fp)
 	outputbuf_sz = 0;
 }
 
-static char *_label() {
+static char *makeLabel() {
 	static int c = 0;
 	char *fmt = malloc(10);
 	sprintf(fmt, "L%d", c++);
@@ -98,18 +98,40 @@ static int is_instruction_mnemonic(char *mnem)
 		return MOV;
 	} else if (MATCHES("add")) {
 		return ADD;
+	} else if (MATCHES("sub")) {
+		return SUB;
+	} else if (MATCHES("and")) {
+		return AND;
+	} else if (MATCHES("shr")) {
+		return SHR;
+	} else if (MATCHES("shl")) {
+		return SHL;
+	} else if (MATCHES("not")) {
+		return NOT;
+	} else if (MATCHES("or")) {
+		return OR;
+	} else if (MATCHES("neg")) {
+		return NEG;
 	} else if (MATCHES("cmp")) {
 		return CMP;
 	} else if (MATCHES("inc")) {
 		return INC;
+	} else if (MATCHES("dec")) {
+		return DEC;
 	} else if (MATCHES("je")) {
 		return JE;
 	} else if (MATCHES("jne")) {
 		return JNE;
-	} else if (MATCHES("jz")) {
-		return JZ;
-	} else if (MATCHES("jnz")) {
-		return JNZ;
+	} else if (MATCHES("jl")) {
+		return JL;
+	} else if (MATCHES("jle")) {
+		return JLE;
+	} else if (MATCHES("jg")) {
+		return JG;
+	} else if (MATCHES("jge")) {
+		return JGE;
+	} else if (MATCHES("jmp")) {
+		return JMP;
 	} else if (MATCHES("goto")) {
 		return GOTO;
 	} else if (MATCHES("push")) {
@@ -127,9 +149,11 @@ static int is_assignment_mnemonic(char *mnem)
 	if (mnem[0] == '\t') {
 		off = 1;
 	}
+
 	if (MATCHES("mov")) {
 		return MOV;
 	}
+
 	return 0;
 }
 
@@ -142,14 +166,26 @@ static int is_unary_mnemonic(char *mnem)
 
  	if (MATCHES("inc")) {
 		return INC;
+	} else if (MATCHES("dec")) {
+		return DEC;
+	} else if (MATCHES("neg")) {
+		return NEG;
+	} else if (MATCHES("not")) {
+		return NOT;
 	} else if (MATCHES("je")) {
 		return JE;
 	} else if (MATCHES("jne")) {
 		return JNE;
-	} else if (MATCHES("jz")) {
-		return JZ;
-	} else if (MATCHES("jnz")) {
-		return JNZ;
+	} else if (MATCHES("jl")) {
+		return JL;
+	} else if (MATCHES("jle")) {
+		return JLE;
+	} else if (MATCHES("jg")) {
+		return JG;
+	} else if (MATCHES("jge")) {
+		return JGE;
+	} else if (MATCHES("jmp")) {
+		return JMP;
 	} else if (MATCHES("goto")) {
 		return GOTO;
 	} else if (MATCHES("push")) {
@@ -405,8 +441,7 @@ void gen(Node **funcs, size_t n_funcs)
 			strcpy(tmpbuf, ins_array[i]->mnem);
 			strcat(tmpbuf, ":\n");
 		} else {
-			strcpy(tmpbuf, ins_array[i]->mnem);
-			strcat(tmpbuf, "\n");
+			strcpy(tmpbuf, ins_array[i]->mnem); strcat(tmpbuf, "\n");
 		}
 
 		outputbuf_sz += strlen(tmpbuf) + 1;
@@ -493,6 +528,7 @@ static void emit_store(Node *n)
 			switch (n->lvar_valproppair->type)
 			{
 				case TYPE_INT:
+				default:
 					stack_offset += 4;
 					n->lvar_valproppair->loff = stack_offset;
 					emit("mov [rbp-%d] vd%d", stack_offset, vregs_idx++);
@@ -503,8 +539,6 @@ static void emit_store(Node *n)
 					emit("mov [rbp-%d] vw%d", stack_offset, vregs_idx-1);
 					emit("mov [rbp-%d] v%d", stack_offset+2, vregs_idx++);
 					break;
-				default:
-					break;
 			}
 			break;
 		case AST_IDENT:
@@ -512,13 +546,12 @@ static void emit_store(Node *n)
 			switch (n->lvar_valproppair->type)
 			{
 				case TYPE_INT:
+				default:
 					emit("mov [rbp-%d] v%d", off, vregs_idx++);
 					break;
 				case TYPE_STRING:
 					emit("mov [rbp-%d] vw%d", off, vregs_idx-1);
 					emit("mov [rbp-%d] v%d", off+2, vregs_idx++);
-					break;
-				default:
 					break;
 			}
 			break;
@@ -803,7 +836,7 @@ static void emit_literal(Node *expr)
 			break;
 		case AST_STRING:
 			if (!expr->slabel) {
-				expr->slabel = _label();
+				expr->slabel = makeLabel();
 				emit_noindent("\nsection .data");
 				emit("%s db %s", expr->slabel, expr->sval);
 				emit_noindent("\nsection .text");
@@ -940,7 +973,7 @@ static void emit_string_arith_binop(Node *expr)
 	int string2_len = vregs_idx-1;
 	vregs_idx++;
 
-	char *loop_label = _label();
+	char *loop_label = makeLabel();
 
 	int acc = vregs_idx++;
 	emit("mov v%d 0", acc);
@@ -960,18 +993,48 @@ static void emit_string_arith_binop(Node *expr)
 
 	emit("mov v%d v%d", vregs_idx++, string1_len);
 	emit("mov v%d v%d", vregs_idx, string1);
-
 }
 
+// TODO: Flags are loaded into %ah, so make sure rax is not used
+// 	--> Incorporate real regs in lva
 static void emit_comp_binop(Node *expr)
 {
 	emit_expr(expr->left);
-	push("rax");
+	int l_idx = vregs_idx;
+	vregs_idx++;
 	emit_expr(expr->right);
-	emit("mov rcx rax");
-	pop("rax");
 
-	emit("cmp rax rcx");
+	emit("cmp v%d v%d", l_idx, vregs_idx++);
+	char *false_label = makeLabel();
+	char *cont_label = makeLabel();
+
+	switch (expr->type)
+	{
+	case AST_EQ:
+		emit("jne %s", false_label);
+		break;
+	case AST_NE:
+		emit("je %s", false_label);
+		break;
+	case AST_LT:
+		emit("jge %s", false_label);
+		break;
+	case AST_LE:
+		emit("jg %s", false_label);
+		break;
+	case AST_GT:
+		emit("jle %s", false_label);
+		break;
+	case AST_GE:
+		emit("jl %s", false_label);
+		break;
+	}
+
+	emit("mov v%d 1", vregs_idx);
+	emit("jmp %s", cont_label);
+	emit_noindent("%s:", false_label);
+	emit("mov v%d 0", vregs_idx);
+	emit_noindent("%s:", cont_label);
 }
 
 static void op(Node *expr)
@@ -997,8 +1060,21 @@ static void op(Node *expr)
 		break;
 	default:
 		printf("Not implemented.\n");
-		exit(1);
-	}
+		exit(1); }
+}
+
+static void emit_while(Node *n)
+{
+	char *cond_label = makeLabel();
+	char *body_label = makeLabel();
+
+	emit("jmp %s", cond_label);
+
+	emit("%s", body_label);
+	emit_block(n->while_body, n->n_while_stmts);
+
+	emit("%s", cond_label);
+	emit_comp_binop(n->while_cond);
 }
 
 static void emit_ret()
@@ -1033,6 +1109,9 @@ static void emit_expr(Node *expr)
 			break;
 		case AST_ASSIGN:
 			emit_assign(expr);
+			break;
+		case AST_WHILE_STMT:
+			emit_while(expr);
 			break;
 		default:
 			op(expr);
@@ -1141,7 +1220,6 @@ static InterferenceNode **lva()
 						if (saved != live_sz) {
 							used_vregs[n->right->vregs_used[i]->idx] = 1;
 							used_vregs_n++;
-							saved = live_sz;
 						}
 					}
 				}
@@ -1164,36 +1242,46 @@ static InterferenceNode **lva()
 						used_vregs[n->right->idx] = 1;
 						used_vregs_n++;
 					} else if (n->right->type == BRACKET_EXPR) {
+						int saved = live_sz;
 						for (int i = 0; i < n->right->n_vregs_used; i++) {
 							live = addToLiveRange(n->right->vregs_used[i], live, &live_sz);
+							if (saved != live_sz) {
+								used_vregs[n->right->vregs_used[i]->idx] = 1;
+								used_vregs_n++;
+							}
 						}
 					}
 				}
 				if (n->left->type == VIRTUAL_REG) {
 					live = addToLiveRange(n->left, live, &live_sz);
+					used_vregs[n->left->idx] = 1;
+					used_vregs_n++;
 				} else if (n->left->type == BRACKET_EXPR) {
+					int saved = live_sz;
 					for (int i = 0; i < n->left->n_vregs_used; i++) {
 						live = addToLiveRange(n->left->vregs_used[i], live, &live_sz);
+						if (saved != live_sz) {
+							used_vregs[n->right->vregs_used[i]->idx] = 1;
+							used_vregs_n++;
+						}
 					}
-				} else if (p == 1 && (n->type >= JE && n->type <= GOTO)) {   // control-flow change instructions
+				} else if (p == 1 && (n->type >= JE && n->type <= GOTO)) {   // control-flow change instruction
 					char *label = n->left->mnem;
 					int *live_at_label = NULL;
 					size_t live_at_label_sz = 0;
 					for (int j = 0; j < ins_array_sz; j++) {
 						if (ins_array[j]->type == LABEL) {
 							if (!strcmp(ins_array[j]->mnem, label)) {
-								live_at_label = live_range[j];
-								live_at_label_sz = live_sz_array[j];
+								if (j < i) {
+									live_at_label = live_range[j];
+									live_at_label_sz = live_sz_array[j];
+								}
 								break;
 							}
 						}
 					}
 					if (live_at_label != NULL) {
-						live = liverange_union(live, live_at_label, live_sz, &live_at_label_sz);
-						live_sz = live_at_label_sz;
-					} else {
-						printf("Label %s not found.\n", label);
-						c_error("", -1);
+						live = liverange_union(live_at_label, live, live_at_label_sz, &live_sz);
 					}
 				}
 			}
