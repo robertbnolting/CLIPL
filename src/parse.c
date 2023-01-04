@@ -1781,11 +1781,6 @@ static void thread_expression(Node *expr)
 			last_node = expr;
 			break;
 		case AST_IDX_ARRAY:
-			/*
-			for (int i = expr->ndim_index-1; i >= 0; i--) {
-				thread_expression(expr->index_values[i]);
-			}
-			*/
 			last_node->successor = expr;
 			last_node = expr;
 			break;
@@ -2913,5 +2908,8 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 
 			break;
 		}
+		case AST_WHILE_STMT:
+			interpret_expr(expr->while_true_successor, opstack, valstack);
+			interpret_expr(expr->successor, opstack, valstack);
 	}
 }

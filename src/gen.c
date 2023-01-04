@@ -44,6 +44,7 @@ static void emit_declaration();
 static void emit_assign();
 static void emit_store();
 static void emit_lvar();
+static void emit_while();
 static int emit_array_assign();
 static int emit_offset_assign();
 
@@ -547,7 +548,7 @@ static void emit_store(Node *n)
 			{
 				case TYPE_INT:
 				default:
-					emit("mov [rbp-%d] v%d", off, vregs_idx++);
+					emit("mov [rbp-%d] vd%d", off, vregs_idx++);
 					break;
 				case TYPE_STRING:
 					emit("mov [rbp-%d] vw%d", off, vregs_idx-1);
@@ -829,10 +830,10 @@ static void emit_literal(Node *expr)
 	switch (expr->type)
 	{
 		case AST_INT:
-			emit("mov v%d %u", vregs_idx, expr->ival);
+			emit("mov vd%d %u", vregs_idx, expr->ival);
 			break;
 		case AST_BOOL:
-			emit("mov v%d %u", vregs_idx, expr->bval);
+			emit("mov vd%d %u", vregs_idx, expr->bval);
 			break;
 		case AST_STRING:
 			if (!expr->slabel) {
@@ -958,7 +959,7 @@ static void emit_int_arith_binop(Node *expr)
 	vregs_count++;
 	emit_expr(expr->right);
 
-	emit("%s v%d v%d", op, vregs_idx, saved_idx);
+	emit("%s vd%d vd%d", op, vregs_idx, saved_idx);
 }
 
 static void emit_string_arith_binop(Node *expr)
@@ -995,8 +996,6 @@ static void emit_string_arith_binop(Node *expr)
 	emit("mov v%d v%d", vregs_idx, string1);
 }
 
-// TODO: Flags are loaded into %ah, so make sure rax is not used
-// 	--> Incorporate real regs in lva
 static void emit_comp_binop(Node *expr)
 {
 	emit_expr(expr->left);
@@ -1004,7 +1003,7 @@ static void emit_comp_binop(Node *expr)
 	vregs_idx++;
 	emit_expr(expr->right);
 
-	emit("cmp v%d v%d", l_idx, vregs_idx++);
+	emit("cmp vd%d vd%d", l_idx, vregs_idx++);
 	char *false_label = makeLabel();
 	char *cont_label = makeLabel();
 
@@ -1030,10 +1029,10 @@ static void emit_comp_binop(Node *expr)
 		break;
 	}
 
-	emit("mov v%d 1", vregs_idx);
+	emit("mov vd%d 1", vregs_idx);
 	emit("jmp %s", cont_label);
 	emit_noindent("%s:", false_label);
-	emit("mov v%d 0", vregs_idx);
+	emit("mov vd%d 0", vregs_idx);
 	emit_noindent("%s:", cont_label);
 }
 
@@ -1060,7 +1059,8 @@ static void op(Node *expr)
 		break;
 	default:
 		printf("Not implemented.\n");
-		exit(1); }
+		exit(1); 
+	}
 }
 
 static void emit_while(Node *n)
@@ -1070,11 +1070,13 @@ static void emit_while(Node *n)
 
 	emit("jmp %s", cond_label);
 
-	emit("%s", body_label);
+	emit_noindent("%s:", body_label);
 	emit_block(n->while_body, n->n_while_stmts);
 
-	emit("%s", cond_label);
+	emit_noindent("%s:", cond_label);
 	emit_comp_binop(n->while_cond);
+	emit("cmp vd%d 1", vregs_idx++);
+	emit("je %s", body_label);
 }
 
 static void emit_ret()
