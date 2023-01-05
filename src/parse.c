@@ -1696,15 +1696,19 @@ static Node *read_ident(Token_type *tok, int no_brackets)
 	return ast_identtype(s);
 }
 
-static Node *find_function(char *name)
+static int find_function(char *name)
 {
+	if (!strcmp("syscall", name)) {
+		return -2;
+	}
+
 	for (int i = 0; i < global_function_count; i++) {
 		if (!strcmp(global_functions[i]->flabel, name)) {
-			return global_functions[i];
+			return i;
 		}
 	}
 
-	return NULL;
+	return -1;
 }
 
 static Node *find_record(char *name)
@@ -1833,15 +1837,18 @@ static void thread_expression(Node *expr)
 
 			break;
 		case AST_FUNCTION_CALL:
-			Node *func = find_function(expr->call_label);
-			if (func == NULL) {
+		{
+			int idx = find_function(expr->call_label);
+			if (idx == -1) {
 				char *msg = malloc(128);
 				sprintf(msg, "No function with name '%s' was found.", expr->call_label);
 				c_error(msg, -1);
 				free(msg);
 			}
+			expr->global_function_idx = idx;
 			last_node->successor = expr;
 			last_node = expr;
+		}
 			break;
 		case AST_RETURN_STMT:
 			last_node->successor = expr;

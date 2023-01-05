@@ -48,6 +48,7 @@ static void emit_if();
 static void emit_while();
 static int emit_array_assign();
 static int emit_offset_assign();
+static void emit_syscall();
 
 static int do_array_arithmetic();
 
@@ -465,10 +466,19 @@ void pop(char *reg)
 }
 
 // TODO: variable args for syscall parameters
-static void emit_syscall(int code /*,...*/)
+static void emit_syscall(int code, int argc, int *arg_list)
 {
-	emit_noindent("\n\n\tmov rax %d", code);
-	emit("mov rdi 0");
+	if (argc > 6) {
+		c_error("Too many arguments for linux syscall.", -1);
+	}
+
+	char *regs[] = {"rdi", "rsi", "rdx", "r10", "r8", "r9"};
+
+	emit("mov rax %d", code);
+
+	for (int i = 0; i < argc; i++) {
+		emit("mov %s %d", regs[i], arg_list[i]);
+	}
 
 	emit("syscall");
 }
@@ -510,7 +520,8 @@ static void emit_func_prologue(Node *func)
 	emit_block(func->fnbody, func->n_stmts);
 
 	if (func->is_fn_entrypoint) {
-		emit_syscall(60);
+		int regs[] = {0};
+		emit_syscall(60, 1, &regs[0]);
 	}
 }
 
@@ -1100,6 +1111,24 @@ static void emit_while(Node *n)
 	emit("je %s", body_label);
 }
 
+static void emit_func_call(Node *n)
+{
+	int idx = n->global_function_idx;
+
+	if (idx < 0) {
+		if (n->n_args < 2) {
+			c_error("Invalid syscall expression. Correct usage is: syscall(NR, arg0, ...)", -1);
+		}
+		int args[n->n_args];
+		for (int i = 0; i < n->n_args; i++) {
+			// TODO: resolve syscall args to int values
+			args[i] = n->callargs[i]->ival;
+		}
+
+		emit_syscall(args[0], n->n_args-1, &args[1]);
+	}
+}
+
 static void emit_ret()
 {
 	emit("leave");
@@ -1138,6 +1167,9 @@ static void emit_expr(Node *expr)
 			break;
 		case AST_WHILE_STMT:
 			emit_while(expr);
+			break;
+		case AST_FUNCTION_CALL:
+			emit_func_call(expr);
 			break;
 		default:
 			op(expr);

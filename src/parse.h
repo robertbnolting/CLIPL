@@ -168,6 +168,7 @@ typedef struct Node {
 			char *call_label;
 			size_t n_args;
 			struct Node **callargs;
+			int global_function_idx;
 		};
 		// if statement
 		struct {
