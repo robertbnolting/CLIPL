@@ -1995,7 +1995,7 @@ static Stack *mergeValueStacks(Stack *stack1, Stack *stack2, Stack *oldstack)
 	return ret_stack;
 }
 
-static void sym_interpret(Node *cfg/*, Node **ops, ValPropPair **vals*/)
+static void sym_interpret(Node *cfg)
 {
 	Stack *opstack = init_stack(512);
 	Stack *valstack = init_stack(512);
@@ -2877,6 +2877,11 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 			Node *end_if;
 			interpret_if_stmt(expr, *opstack, *valstack);
 
+			end_if = interpret_expr(expr->successor, opstack, valstack);
+
+			interpret_expr(expr->false_successor, opstack, valstack);
+
+			/*
 			Stack *opstack_then = copyOpStack(*opstack);
 			Stack *valstack_then = copyValStack(*valstack);
 
@@ -2903,6 +2908,7 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 				}
 				free(valstack_then);
 			}
+				*/
 
 			interpret_expr(end_if->successor, opstack, valstack);
 
@@ -2911,5 +2917,6 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 		case AST_WHILE_STMT:
 			interpret_expr(expr->while_true_successor, opstack, valstack);
 			interpret_expr(expr->successor, opstack, valstack);
+			break;
 	}
 }

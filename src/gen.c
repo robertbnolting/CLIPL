@@ -44,6 +44,7 @@ static void emit_declaration();
 static void emit_assign();
 static void emit_store();
 static void emit_lvar();
+static void emit_if();
 static void emit_while();
 static int emit_array_assign();
 static int emit_offset_assign();
@@ -68,7 +69,7 @@ size_t ins_array_sz = 0;
 void set_output_file(FILE *fp)
 {
 	outputfp = fp;
-	outputbuf = malloc(0);
+	outputbuf = NULL;
 	outputbuf_sz = 0;
 }
 
@@ -1059,8 +1060,28 @@ static void op(Node *expr)
 		break;
 	default:
 		printf("Not implemented.\n");
-		exit(1); 
+		exit(1);
 	}
+}
+
+static void emit_if(Node *n)
+{
+	char *cont_label = makeLabel();
+	char *else_label = makeLabel();
+
+	emit_expr(n->if_cond);
+
+	emit("cmp vd%d 1", vregs_idx++);
+	emit("jne %s", else_label);
+
+	emit_block(n->if_body, n->n_if_stmts);
+
+	emit("jmp %s", cont_label);
+	emit_noindent("%s:", else_label);
+
+	emit_block(n->else_body, n->n_else_stmts);
+
+	emit_noindent("%s:", cont_label);
 }
 
 static void emit_while(Node *n)
@@ -1111,6 +1132,9 @@ static void emit_expr(Node *expr)
 			break;
 		case AST_ASSIGN:
 			emit_assign(expr);
+			break;
+		case AST_IF_STMT:
+			emit_if(expr);
 			break;
 		case AST_WHILE_STMT:
 			emit_while(expr);
