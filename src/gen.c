@@ -465,19 +465,24 @@ void pop(char *reg)
 	emit("pop %s", reg);
 }
 
-// TODO: variable args for syscall parameters
-static void emit_syscall(int code, int argc, int *arg_list)
+static void emit_syscall(Node **args, size_t n_args)
 {
-	if (argc > 6) {
+	if (n_args < 2) {
+		c_error("Invalid syscall expression. Correct usage is: syscall(NR, arg0, ...)", -1);
+	} else if (n_args > 6) {
 		c_error("Too many arguments for linux syscall.", -1);
 	}
 
 	char *regs[] = {"rdi", "rsi", "rdx", "r10", "r8", "r9"};
 
-	emit("mov rax %d", code);
-
-	for (int i = 0; i < argc; i++) {
-		emit("mov %s %d", regs[i], arg_list[i]);
+	for (int i = 0; i < n_args; i++) {
+		if (i == 0) {
+			emit_expr(args[i]);
+			emit("mov rax v%d", vregs_idx++);
+		} else {
+			emit_expr(args[i]);
+			emit("mov %s v%d", regs[i-1], vregs_idx++);
+		}
 	}
 
 	emit("syscall");
@@ -520,8 +525,9 @@ static void emit_func_prologue(Node *func)
 	emit_block(func->fnbody, func->n_stmts);
 
 	if (func->is_fn_entrypoint) {
-		int regs[] = {0};
-		emit_syscall(60, 1, &regs[0]);
+		emit("mov rax 60");
+		emit("mov rdi 0");
+		emit("syscall");
 	}
 }
 
@@ -1116,6 +1122,7 @@ static void emit_func_call(Node *n)
 	int idx = n->global_function_idx;
 
 	if (idx < 0) {
+		/*
 		if (n->n_args < 2) {
 			c_error("Invalid syscall expression. Correct usage is: syscall(NR, arg0, ...)", -1);
 		}
@@ -1126,6 +1133,8 @@ static void emit_func_call(Node *n)
 		}
 
 		emit_syscall(args[0], n->n_args-1, &args[1]);
+		*/
+		emit_syscall(n->callargs, n->n_args);
 	}
 }
 
@@ -1234,6 +1243,7 @@ static int *liverange_union(int *live1, int *live2, size_t size1, size_t *size2)
 	return live2;
 }
 
+// TODO: add real regs to lva
 static InterferenceNode **lva()
 {
 	int *live_range[ins_array_sz];
