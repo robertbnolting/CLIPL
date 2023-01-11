@@ -26,9 +26,11 @@ enum MnemType {
 	BRACKET_EXPR,
 	BRACKET_ADD,
 	VIRTUAL_REG,
+	REAL_REG,
 	LABEL,
 	LITERAL,
 	SPECIFIER,
+	SYSCALL,
 };
 
 typedef struct MnemNode {
