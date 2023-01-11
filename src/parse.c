@@ -85,6 +85,7 @@ static void sym_interpret();
 static Node *interpret_expr();
 static void interpret_assignment_expr();
 static void interpret_declaration_expr();
+static void interpret_func_call();
 
 static void interpret_binary_expr();
 static void interpret_binary_int_expr();
@@ -1846,6 +1847,9 @@ static void thread_expression(Node *expr)
 				free(msg);
 			}
 			expr->global_function_idx = idx;
+
+			thread_block(expr->callargs, expr->n_args);
+
 			last_node->successor = expr;
 			last_node = expr;
 		}
@@ -2728,6 +2732,15 @@ static void interpret_binary_expr(Node *operator, Stack *opstack, Stack *valstac
 	}
 }
 
+static void interpret_func_call(Node *n, Stack *opstack, Stack *valstack)
+{
+	for (int i = 0; i < n->n_args; i++) {
+		Node *arg = (Node *) pop(opstack);
+
+		// TODO: Check call args
+	}
+}
+
 static void interpret_if_stmt(Node *stmt, Stack *opstack, Stack *valstack)
 {
 	Node *condition_outcome = (Node *) pop(opstack);
@@ -2877,6 +2890,10 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 			break;
 		case AST_ASSIGN:
 			interpret_assignment_expr(expr, *opstack, *valstack);
+			interpret_expr(expr->successor, opstack, valstack);
+			break;
+		case AST_FUNCTION_CALL:
+			interpret_func_call(expr, *opstack, *valstack);
 			interpret_expr(expr->successor, opstack, valstack);
 			break;
 		case AST_IF_STMT:
