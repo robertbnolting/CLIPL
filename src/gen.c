@@ -233,6 +233,17 @@ MnemNode *makeMnemNode(char *mnem)
 
 	MnemNode *r = malloc(sizeof(MnemNode));
 
+	r->left = NULL;
+	r->right = NULL;
+
+	r->left_spec = NULL;
+	r->right_spec = NULL;
+
+	r->first_def = 0;
+
+	r->vregs_used = NULL;
+	r->n_vregs_used = 0;
+
 	int off = 0;
 	if (mnem[0] == '\t') {
 		off = 1;
@@ -317,13 +328,6 @@ MnemNode *makeMnemNode(char *mnem)
 	}
 
 	r->type = type;
-	r->left = NULL;
-	r->right = NULL;
-
-	r->left_spec = NULL;
-	r->right_spec = NULL;
-
-	r->first_def = 0;
 
 	return r;
 }
@@ -1296,7 +1300,7 @@ static InterferenceNode **lva()
 			size_t live_del_sz = 0;
 
 			if ((i == ins_array_sz-1)  && (p == 1) && (used_vregs_n != vregs_count)) { 	// not all vregs used
-				for (int j = MAX_REGISTER_COUNT; j < used_vregs_n; j++) {
+				for (int j = MAX_REGISTER_COUNT; j < vregs_count; j++) {
 					if (!used_vregs[j]) {
 						live = realloc(live, sizeof(int) * (live_sz+1));
 						live[live_sz++] = j;
