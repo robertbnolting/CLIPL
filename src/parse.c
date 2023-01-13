@@ -1927,7 +1927,7 @@ static ValPropPair *makeValPropPair(ValPropPair *tmp)
 static ValPropPair *searchValueStack(Stack *stack, char *key)
 {
 	for (int i = 0; i < stack->size; i++) {
-		if (!strcmp(((ValPropPair *)stack->start[i])->var_name, key)) { 
+		if (!strcmp(((ValPropPair *)stack->start[i])->var_name, key)) {
 			return (ValPropPair *) stack->start[i];
 		}
 	}
@@ -1981,10 +1981,17 @@ static Stack *mergeValueStacks(Stack *stack1, Stack *stack2, Stack *oldstack)
 				{
 					stack1Element->status = 2;
 					push(ret_stack, stack1Element);
+					stack1Element->ref_node->lvar_valproppair = old_pair;
+					stack2Element->ref_node->lvar_valproppair = old_pair;
+					//stack2Element = old_pair;
 				} else if (!old_pair->status && stack1Element->status && stack2Element->status) {
 					push(ret_stack, stack1Element);
+					stack1Element->ref_node->lvar_valproppair = old_pair;
+					stack2Element->ref_node->lvar_valproppair = old_pair;
 				} else if (old_pair->status) {
 					push(ret_stack, stack1Element);
+					stack1Element->ref_node->lvar_valproppair = old_pair;
+					stack2Element->ref_node->lvar_valproppair = old_pair;
 				}
 			} else {
 				push(ret_stack, stack1Element);
@@ -2399,6 +2406,8 @@ static void interpret_declaration_expr(Node *expr, Stack *opstack, Stack *valsta
 		}
 	}
 
+	pair->ref_node = expr;
+
 	expr->lvar_valproppair = pair;
 
 	push(valstack, pair);
@@ -2724,20 +2733,9 @@ static void interpret_binary_expr(Node *operator, Stack *opstack, Stack *valstac
 static void interpret_if_stmt(Node *stmt, Stack *opstack, Stack *valstack)
 {
 	Node *condition_outcome = (Node *) pop(opstack);
-	int outcome;
 
-	if (condition_outcome->type == AST_INT) {
-		outcome = condition_outcome->ival;
-	} else if (condition_outcome->type == AST_BOOL) {
-		outcome = condition_outcome->bval;
-	} else {
+	if (!((condition_outcome->type == AST_INT) || (condition_outcome->type == AST_BOOL))) {
 		c_error("Invalid conditional expression in if statement.", -1);
-	}
-
-	if (!outcome && stmt->false_successor == NULL) {
-		stmt->else_reachable = -1;
-	} else {
-		stmt->else_reachable = !outcome;
 	}
 }
 
@@ -2877,38 +2875,30 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 			Node *end_if;
 			interpret_if_stmt(expr, *opstack, *valstack);
 
+			void *saved_top = (*valstack)->top;
+			Stack *saved_valstack = copyValStack(*valstack);
+
 			end_if = interpret_expr(expr->successor, opstack, valstack);
+
+			(*valstack)->top = saved_top;
+			(*valstack)->size = saved_valstack->size;
+
+			for (int i = 0; i < (*valstack)->size; i++) {
+				if (!((ValPropPair*)saved_valstack->start[i])->status && ((ValPropPair*)(*valstack)->start[i])->status) {
+					((ValPropPair*)(*valstack)->start[i])->status = 2;
+				}
+			}
 
 			interpret_expr(expr->false_successor, opstack, valstack);
 
-			/*
-			Stack *opstack_then = copyOpStack(*opstack);
-			Stack *valstack_then = copyValStack(*valstack);
+			(*valstack)->top = saved_top;
+			(*valstack)->size = saved_valstack->size;
 
-			end_if = interpret_expr(expr->successor, &opstack_then, &valstack_then);
-
-			if (expr->false_successor) {
-				Stack *opstack_else = copyOpStack(*opstack);
-				Stack *valstack_else = copyValStack(*valstack);
-
-				interpret_expr(expr->false_successor, &opstack_else, &valstack_else);
-
-				if (!expr->else_reachable) {
-					*valstack = mergeValueStacks(valstack_then, valstack_else, *valstack);
-					free(valstack_then);
-					free(valstack_else);
-				} else if (expr->else_reachable) {
-					*valstack = mergeValueStacks(valstack_else, valstack_then, *valstack);
-					free(valstack_then);
-					free(valstack_else);
+			for (int i = 0; i < (*valstack)->size; i++) {
+				if (!((ValPropPair*)saved_valstack->start[i])->status && ((ValPropPair*)(*valstack)->start[i])->status) {
+					((ValPropPair*)(*valstack)->start[i])->status = 2;
 				}
-			} else {
-				if (!expr->else_reachable) {
-					*valstack = mergeValueStacks(valstack_then, NULL, *valstack);
-				}
-				free(valstack_then);
 			}
-				*/
 
 			interpret_expr(end_if->successor, opstack, valstack);
 
