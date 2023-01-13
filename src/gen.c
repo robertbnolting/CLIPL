@@ -102,8 +102,7 @@ static int is_instruction_mnemonic(char *mnem)
 	} else if (MATCHES("add")) {
 		return ADD;
 	} else if (MATCHES("sub")) {
-		return SUB;
-	} else if (MATCHES("and")) {
+		return SUB; } else if (MATCHES("and")) {
 		return AND;
 	} else if (MATCHES("shr")) {
 		return SHR;

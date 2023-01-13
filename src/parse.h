@@ -179,8 +179,6 @@ typedef struct Node {
 			struct Node **else_body;
 			// cfg
 			struct Node *false_successor;
-			// annotation
-			int else_reachable; // 0 -> only then, 1 -> only else, -1 -> neither
 		};
 		// while statement
 		struct {
