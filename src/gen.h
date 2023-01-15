@@ -2,6 +2,7 @@ void gen();
 
 enum MnemType {
 	MOV = 1,
+	LEA,
 	ADD,
 	SUB,
 	AND,

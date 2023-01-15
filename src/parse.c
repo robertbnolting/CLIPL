@@ -2839,14 +2839,22 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 				c_error(msg, -1);
 			}
 
+			for (int i = 0; i < expr->ndim_index; i++) {
+				interpret_expr(expr->index_values[i], opstack, valstack);
+				pop(*opstack);
+			}
+
 			// TODO: Type checking here
 			// if (pair->array_dims > expr->ndim_index)
 
+			// TODO: resolve index_values[i] to something other than just int
+			/*
 			for (int i = 0; i < expr->ndim_index; i++) {
 				if (expr->index_values[i]->ival > pair->array_size[i]-1) {
 					c_error("Array index can't be bigger than array size.", -1);
 				}
 			}
+			*/
 
 			int diff = pair->array_dims - expr->ndim_index;
 			if (diff > 0) {
@@ -2924,7 +2932,9 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 				}
 			}
 
-			interpret_expr(end_if->successor, opstack, valstack);
+			if (end_if) {
+				interpret_expr(end_if->successor, opstack, valstack);
+			}
 
 			break;
 		}

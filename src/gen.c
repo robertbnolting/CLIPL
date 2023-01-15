@@ -99,10 +99,13 @@ static int is_instruction_mnemonic(char *mnem)
 
 	if (MATCHES("mov")) {
 		return MOV;
+	} else if (MATCHES("lea")) {
+		return LEA;
 	} else if (MATCHES("add")) {
 		return ADD;
 	} else if (MATCHES("sub")) {
-		return SUB; } else if (MATCHES("and")) {
+		return SUB; 
+	} else if (MATCHES("and")) {
 		return AND;
 	} else if (MATCHES("shr")) {
 		return SHR;
@@ -154,6 +157,8 @@ static int is_assignment_mnemonic(char *mnem)
 
 	if (MATCHES("mov")) {
 		return MOV;
+	} else if (MATCHES("lea")) {
+		return LEA;
 	}
 
 	return 0;
@@ -260,7 +265,7 @@ MnemNode *makeMnemNode(char *mnem)
 		if (mnem_p[off] == '[') {
 			type = BRACKET_EXPR;
 			while (*(++mnem_p) != ']') {
-				if (*mnem_p != 'v' && !(*mnem_p >= '0' && *mnem_p <= '9')) {
+				if (*mnem_p != 'v' && !(*mnem_p >= '0' && *mnem_p <= '9') && !(*mnem_p == 'd' || *mnem_p == 'w' || *mnem_p == 'b')) {
 					if (buf_sz) {
 						MnemNode *n = makeMnemNode(buf);
 						r->vregs_used = realloc(r->vregs_used, sizeof(MnemNode*) * (r->n_vregs_used+1));
@@ -609,10 +614,6 @@ static void emit_store(Node *n)
 					break;
 			}
 			break;
-		case AST_IDX_ARRAY:
-			off = get_idx_offset(n);
-			emit("mov [rbp+%d] v%d", off, vregs_idx++);
-			break;
 		default:
 			printf("Not implemented.\n");
 			break;
@@ -895,7 +896,7 @@ static void emit_literal(Node *expr)
 				emit("%s db %s", expr->slabel, expr->sval);
 				emit_noindent("\nsection .text");
 			}
-			emit("mov v%d %ld", vregs_idx++, expr->slen);
+			//emit("mov v%d %ld", vregs_idx++, expr->slen);
 			emit("mov v%d %s", vregs_idx, expr->slabel);
 			break;
 		case AST_ARRAY:
@@ -905,29 +906,53 @@ static void emit_literal(Node *expr)
 	}
 }
 
-static int get_idx_offset(Node *n)
+static void emit_idx_array(Node *n)
 {
 	ValPropPair *ref_array = n->lvar_valproppair->ref_array; // TODO: check in parse.c if {AST_IDX_ARRAY}->lvar_valproppair is necessary
-	int array_offset = 0;
+
+	/*
+	int sizeaccs[n->ndim_index-1];
+	for (int i = 0; i < n->ndim_index; i++) {
+		sizeaccs[i] = 1;
+		for (int j = i+1; j < ref_array->array_dims; j++) {
+			sizeaccs[i] *= ref_array->array_size[j];
+		}
+	}
+
+	int offset_reg = vregs_idx++;
+	emit("mov vd%d 0", offset_reg);
+	if (n->ndim_index > 1) {
+		int acc_reg = vregs_idx++;
+		char *loop_label = makeLabel();
+		emit("mov vd%d 0", acc_reg);
+		emit_noindent("%s:", loop_label);
+
+		emit_expr(n->index_values[i]);
+		emit("lea vd%d [vd%d*%d]", vregs_idx, vregs_idx, sizeacc);
+		emit("add vd%d vd%d", offset_reg, vregs_idx);
+		emit("cmp vd%d %d", acc_reg, n->ndim_index);
+		emit("jl %s", loop_label);
+	}
+	*/
+
+	int offset_reg = vregs_idx++;
+	emit("mov vd%d 0", offset_reg);
 	for (int i = 0; i < n->ndim_index; i++) {
 		int sizeacc = 1;
 		for (int j = i+1; j < ref_array->array_dims; j++) {
 			sizeacc *= ref_array->array_size[j];
 		}
-		array_offset += n->index_values[i]->ival * sizeacc;
+
+		emit_expr(n->index_values[i]);
+
+		emit("lea vd%d [vd%d*%d]", vregs_idx, vregs_idx, sizeacc);
+		emit("add vd%d vd%d", offset_reg, vregs_idx);
 	}
 
-	return ref_array->loff - 4 * array_offset;
-}
-
-// TODO: Port all AST_ARRAY properties to registers
-static void emit_idx_array(Node *n)
-{
-	n->lvar_valproppair->loff = get_idx_offset(n);
-
-	if (!n->lvar_valproppair->array_dims) {
-		emit("mov vd%d [rbp-%d]", vregs_idx, n->lvar_valproppair->loff);
-	}
+	emit("lea vd%d [vd%d*4]", offset_reg, offset_reg);
+	emit("add rbp v%d", offset_reg);
+	emit("mov vd%d [rbp-%d]", vregs_idx, ref_array->loff);
+	emit("sub rbp v%d", offset_reg);
 }
 
 static void emit_load(int offset, char *base, int type)
@@ -1308,7 +1333,7 @@ static InterferenceNode **lva()
 			}
 
 			n = ins_array[i];
-			if (n->type == MOV) {
+			if (n->type >= MOV && n->type <= LEA) {
 				if (n->right->type == VIRTUAL_REG || n->right->type == REAL_REG) {
 					live = addToLiveRange(n->right->idx, live, &live_sz);
 					if (!used_vregs[n->right->idx]) {
