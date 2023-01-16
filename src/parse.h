@@ -71,7 +71,10 @@ typedef struct ValPropPair {
 	struct Node *ref_node;
 	union {
 		int ival;
-		char *sval;
+		struct {
+			char *sval;
+			size_t slen;
+		};
 		float fval;
 		int bval;
 		struct {

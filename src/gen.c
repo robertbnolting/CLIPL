@@ -48,6 +48,8 @@ static void emit_if();
 static void emit_while();
 static int emit_array_assign();
 static int emit_offset_assign();
+static size_t emit_string_assign();
+static size_t emit_string_arith_binop();
 static void emit_syscall();
 
 static int do_array_arithmetic();
@@ -56,6 +58,7 @@ static int **getArrayMembers();
 static int get_idx_offset();
 
 static InterferenceNode **lva();
+static void sortByColor();
 static void optimize();
 
 #define emit(...)		emitf("\t"  __VA_ARGS__)
@@ -87,6 +90,21 @@ static void clear(char *a)
 		*a = 0;
 		a++;
 	}
+}
+
+static int isType(Node *n, int type)
+{
+	if (n->type == type) {
+		return 1;
+	} else {
+		if (n->lvar_valproppair) {
+			if (n->lvar_valproppair->type == type) {
+				return 1;
+			}
+		}
+	}
+
+	return 0;
 }
 
 #define MATCHES(x) (!strcmp(mnem+off, x))
@@ -282,6 +300,13 @@ MnemNode *makeMnemNode(char *mnem)
 						buf[buf_sz++] = *mnem_p;
 					}
 				}
+			}
+			if (buf_sz) {
+				MnemNode *n = makeMnemNode(buf);
+				r->vregs_used = realloc(r->vregs_used, sizeof(MnemNode*) * (r->n_vregs_used+1));
+				r->vregs_used[r->n_vregs_used++] = n; 	// TODO: memcpy
+				clear(buf);
+				buf_sz = 0;
 			}
 		} else if (mnem_p[off] == 'v') {
 			type = VIRTUAL_REG;
@@ -521,7 +546,12 @@ static void emit_syscall(Node **args, size_t n_args)
 			emit("mov rax v%d", vregs_idx++);
 		} else {
 			emit_expr(args[i]);
-			emit("mov %s v%d", regs[i-1], vregs_idx++);
+			if (isType(args[i], TYPE_STRING)) {
+				emit("mov %s v%d", regs[i-1], vregs_idx-1);
+				vregs_idx++;
+			} else {
+				emit("mov %s v%d", regs[i-1], vregs_idx++);
+			}
 		}
 	}
 
@@ -595,8 +625,8 @@ static void emit_store(Node *n)
 				case TYPE_STRING:
 					stack_offset += 10;
 					n->lvar_valproppair->loff = stack_offset;
-					emit("mov [rbp-%d] vw%d", stack_offset, vregs_idx-1);
-					emit("mov [rbp-%d] v%d", stack_offset+2, vregs_idx++);
+					emit("mov [rbp-%d] v%d", stack_offset, vregs_idx-1);
+					emit("mov [rbp-%d] vw%d", stack_offset+2, vregs_idx++);
 					break;
 			}
 			break;
@@ -622,11 +652,13 @@ static void emit_store(Node *n)
 
 static void emit_assign(Node *n)
 {
-	if (n->left->lvar_valproppair->type != TYPE_ARRAY) {
+	if (n->left->lvar_valproppair->type == TYPE_ARRAY) {
+		emit_array_assign(n->left, n->right);
+	} else if (n->left->lvar_valproppair->type == TYPE_STRING) {
+		emit_string_assign(n->left, n->right);
+	} else {
 		emit_expr(n->right);
 		emit_store(n->left);
-	} else {
-		emit_array_assign(n->left, n->right);
 	}
 }
 
@@ -808,77 +840,6 @@ static int do_array_arithmetic(Node *expr, Node *var)
 	}
 }
 
-static Node *getArrayMemberByIndex(Node **array, int idx)
-{
-	if (!array[0]) {
-		return NULL;
-	}
-
-	if (array[0]->type == AST_ARRAY) {
-		Node *elem = getArrayMemberByIndex(array[0]->array_elems, idx);
-		if (!elem) {
-			return getArrayMemberByIndex(&array[1], idx-1);
-		} else {
-			return elem;
-		}
-	} else {
-		if (idx == 0) {
-			return array[0];
-		} else {
-			return getArrayMemberByIndex(&array[1], idx-1);
-		}
-	}
-}
-
-static char *getArrayElems(Node *expr, int member_type)
-{
-	char *ret = NULL;
-	size_t len = 0;
-
-	if (expr->array_dims > 1) {
-		char *acc = NULL;
-		size_t acc_len = 0;
-		for (int i = 0; i < expr->array_size; i++) {
-			char *sub = getArrayElems(expr->array_elems[i], member_type);
-			acc_len += strlen(sub);
-			acc = realloc(acc, acc_len+1);
-			strcat(acc, sub);
-		}
-
-		len += strlen(acc);
-		ret = realloc(ret, len);
-		strcat(ret, acc);
-	} else {
-		for (int i = 0; i < expr->array_size; i++) {
-			switch (member_type)
-			{
-			case TYPE_INT:
-			{
-				char num[32];
-				int n = sprintf(num, "%d, ", expr->array_elems[i]->ival);
-				len += n;
-				ret = realloc(ret, len+1);
-				strcat(ret, num);
-			}
-			break;
-			case TYPE_STRING:
-			{
-				char *str = malloc(strlen(expr->array_elems[i]->sval)) + 5;
-				int n = sprintf(str, "%s, ", expr->array_elems[i]->sval);
-
-				len += n;
-				ret = realloc(ret, len);
-				strcat(ret, str);
-
-			}
-			break;
-			}
-		}
-	}
-
-	return ret;
-}
-
 static void emit_literal(Node *expr)
 {
 	switch (expr->type)
@@ -893,11 +854,11 @@ static void emit_literal(Node *expr)
 			if (!expr->slabel) {
 				expr->slabel = makeLabel();
 				emit_noindent("\nsection .data");
-				emit("%s db %s", expr->slabel, expr->sval);
+				emit("%s db %s, 0", expr->slabel, expr->sval);
 				emit_noindent("\nsection .text");
 			}
-			//emit("mov v%d %ld", vregs_idx++, expr->slen);
-			emit("mov v%d %s", vregs_idx, expr->slabel);
+			emit("mov v%d %s", vregs_idx++, expr->slabel);
+			emit("mov vw%d %ld", vregs_idx, expr->slen);
 			break;
 		case AST_ARRAY:
 			break;
@@ -909,31 +870,6 @@ static void emit_literal(Node *expr)
 static void emit_idx_array(Node *n)
 {
 	ValPropPair *ref_array = n->lvar_valproppair->ref_array; // TODO: check in parse.c if {AST_IDX_ARRAY}->lvar_valproppair is necessary
-
-	/*
-	int sizeaccs[n->ndim_index-1];
-	for (int i = 0; i < n->ndim_index; i++) {
-		sizeaccs[i] = 1;
-		for (int j = i+1; j < ref_array->array_dims; j++) {
-			sizeaccs[i] *= ref_array->array_size[j];
-		}
-	}
-
-	int offset_reg = vregs_idx++;
-	emit("mov vd%d 0", offset_reg);
-	if (n->ndim_index > 1) {
-		int acc_reg = vregs_idx++;
-		char *loop_label = makeLabel();
-		emit("mov vd%d 0", acc_reg);
-		emit_noindent("%s:", loop_label);
-
-		emit_expr(n->index_values[i]);
-		emit("lea vd%d [vd%d*%d]", vregs_idx, vregs_idx, sizeacc);
-		emit("add vd%d vd%d", offset_reg, vregs_idx);
-		emit("cmp vd%d %d", acc_reg, n->ndim_index);
-		emit("jl %s", loop_label);
-	}
-	*/
 
 	int offset_reg = vregs_idx++;
 	emit("mov vd%d 0", offset_reg);
@@ -960,9 +896,9 @@ static void emit_load(int offset, char *base, int type)
 	switch (type)
 	{
 		case TYPE_STRING:
+			emit("mov v%d [%s-%d]", vregs_idx++, base, offset);
 			emit("mov v%d 0", vregs_idx);
-			emit("mov vw%d [%s-%d]", vregs_idx++, base, offset);
-			emit("mov v%d [%s-%d]", vregs_idx, base, offset+2);
+			emit("mov vw%d [%s-%d]", vregs_idx, base, offset+2);
 			break;
 		case TYPE_ARRAY:
 			break;
@@ -1040,38 +976,76 @@ static void emit_int_arith_binop(Node *expr)
 	emit("%s vd%d vd%d", op, vregs_idx, saved_idx);
 }
 
-static void emit_string_arith_binop(Node *expr)
+static size_t emit_string_assign(Node *var, Node *string)
+{
+	if (string->type == AST_STRING || string->type == AST_IDENT || string->type == AST_IDX_ARRAY) {
+		emit_expr(string);
+		emit_store(var);
+		var->lvar_valproppair->slen = string->slen;
+	} else {
+		size_t len = emit_string_arith_binop(string);
+		emit_store(var);
+		var->lvar_valproppair->slen = len;
+	}
+}
+
+static size_t emit_string_arith_binop(Node *expr)
 {
 	emit_expr(expr->left);
-	int string1 = vregs_idx;
-	int string1_len = vregs_idx-1;
+	int string1_len = vregs_idx;
+	int string1 = vregs_idx-1;
 	vregs_idx++;
 
 	emit_expr(expr->right);
-	int string2 = vregs_idx;
-	int string2_len = vregs_idx-1;
+	int string2_len = vregs_idx;
+	int string2 = vregs_idx-1;
 	vregs_idx++;
 
-	char *loop_label = makeLabel();
+	size_t new_len = expr->left->lvar_valproppair->slen + expr->right->lvar_valproppair->slen;
+
+	char *new_string = makeLabel();
+
+	emit_noindent("section .bss");
+	emit("%s resb %d", new_string, new_len);
+	emit_noindent("section .text");
+
+	char *loop1_label = makeLabel();
+	char *loop2_label = makeLabel();
 
 	int acc = vregs_idx++;
-	emit("mov v%d 0", acc);
-	emit_noindent("%s:", loop_label);
-
 	int single_char = vregs_idx++;
-	int end_of_string1 = vregs_idx++;
+	int new_string_reg = vregs_idx++;
+
+	emit("mov v%d 0", acc);
+	emit_noindent("%s:", loop1_label);
+
+	emit("mov vb%d [v%d+v%d]", single_char, string1, acc);
+	emit("mov v%d %s", new_string_reg, new_string);
+	emit("add v%d v%d", new_string_reg, acc);
+	emit("mov [v%d] vb%d", new_string_reg, single_char);
+	emit("inc v%d", acc);
+	emit("cmp v%d v%d", acc, string1_len);
+	emit("jne %s", loop1_label);
+
+	emit("mov v%d 0", acc);
+	emit("inc v%d", string2_len);
+	emit_noindent("%s:", loop2_label);
+
 	emit("mov vb%d [v%d+v%d]", single_char, string2, acc);
-	emit("mov v%d v%d", end_of_string1, string1);
-	emit("add v%d v%d", end_of_string1, string1_len);
-	emit("add v%d v%d", end_of_string1, acc);
-	emit("mov [v%d] vb%d", end_of_string1, single_char);
+	emit("mov v%d %s", new_string_reg, new_string);
+	emit("add v%d v%d", new_string_reg, string1_len);
+	emit("add v%d v%d", new_string_reg, acc);
+	emit("mov [v%d] vb%d", new_string_reg, single_char);
 	emit("inc v%d", acc);
 	emit("cmp v%d v%d", acc, string2_len);
-	emit("jne %s", loop_label);
+	emit("jne %s", loop2_label);
+	emit("dec v%d", string2_len);
 	emit("add v%d v%d", string1_len, string2_len);
 
-	emit("mov v%d v%d", vregs_idx++, string1_len);
-	emit("mov v%d v%d", vregs_idx, string1);
+	emit("mov v%d %s", vregs_idx++, new_string);
+	emit("mov v%d v%d", vregs_idx, string1_len);
+
+	return new_len;
 }
 
 static void emit_comp_binop(Node *expr)
@@ -1603,6 +1577,10 @@ static void color(InterferenceNode **g)
 			}
 		}
 
+		if (highest_sat->neighbor_count) {
+			sortByColor(highest_sat->neighbors, highest_sat->neighbor_count);
+		}
+
 		int lowest_color = -1;
 		for (int i = 0; i < highest_sat->neighbor_count; i++) {
 			if (highest_sat->neighbors[i]->color == lowest_color+1) {
@@ -1751,6 +1729,53 @@ static void assign_registers(InterferenceNode **g)
 			}
 		}
 	}
+}
+
+
+// Modified insertion sort from https://github.com/geohot/mergesorts/blob/master/mergesort.c
+static void sortByColor(InterferenceNode **arr, size_t len)
+{
+	if (len == 1) { return; }
+	if (len == 2) {
+		if (arr[0]->color > arr[1]->color) {
+			InterferenceNode *t = arr[1];
+			arr[1] = arr[0];
+			arr[0] = t;
+		}
+	}
+
+	size_t p = len/2;
+	InterferenceNode **arr1 = arr;
+	InterferenceNode **arr2 = arr+p;
+
+	sortByColor(arr1, p);
+	sortByColor(arr2, len-p);
+
+	InterferenceNode **t = malloc(sizeof(InterferenceNode *) * len);
+	InterferenceNode **rt = t;
+	while (1) {
+		if (arr1 < arr+p && arr2 < arr+len) {
+			if (arr1[0]->color <= arr2[0]->color) {
+				*t = *arr1;
+				arr1++;
+		} else {
+			*t = *arr2;
+			arr2++;
+		}
+		} else if(arr1 < arr+p) {
+			*t = *arr1;
+			arr1++;
+		} else if(arr2 < arr+len) {
+			*t = *arr2;
+			arr2++;
+		} else {
+			break;
+		}
+		t++;
+	}
+
+	memcpy(arr, rt, sizeof(InterferenceNode *) * len);
+	free(rt);
 }
 
 static void optimize()
