@@ -92,21 +92,6 @@ static void clear(char *a)
 	}
 }
 
-static int isType(Node *n, int type)
-{
-	if (n->type == type) {
-		return 1;
-	} else {
-		if (n->lvar_valproppair) {
-			if (n->lvar_valproppair->type == type) {
-				return 1;
-			}
-		}
-	}
-
-	return 0;
-}
-
 #define MATCHES(x) (!strcmp(mnem+off, x))
 static int is_instruction_mnemonic(char *mnem)
 {
@@ -546,12 +531,7 @@ static void emit_syscall(Node **args, size_t n_args)
 			emit("mov rax v%d", vregs_idx++);
 		} else {
 			emit_expr(args[i]);
-			if (isType(args[i], TYPE_STRING)) {
-				emit("mov %s v%d", regs[i-1], vregs_idx-1);
-				vregs_idx++;
-			} else {
-				emit("mov %s v%d", regs[i-1], vregs_idx++);
-			}
+			emit("mov %s v%d", regs[i-1], vregs_idx++);
 		}
 	}
 
@@ -623,10 +603,9 @@ static void emit_store(Node *n)
 					emit("mov [rbp-%d] vd%d", stack_offset, vregs_idx++);
 					break;
 				case TYPE_STRING:
-					stack_offset += 10;
+					stack_offset += 8;
 					n->lvar_valproppair->loff = stack_offset;
-					emit("mov [rbp-%d] v%d", stack_offset, vregs_idx-1);
-					emit("mov [rbp-%d] vw%d", stack_offset+2, vregs_idx++);
+					emit("mov [rbp-%d] vd%d", stack_offset, vregs_idx++);
 					break;
 			}
 			break;
@@ -639,8 +618,7 @@ static void emit_store(Node *n)
 					emit("mov [rbp-%d] vd%d", off, vregs_idx++);
 					break;
 				case TYPE_STRING:
-					emit("mov [rbp-%d] vw%d", off, vregs_idx-1);
-					emit("mov [rbp-%d] v%d", off+2, vregs_idx++);
+					emit("mov [rbp-%d] vd%d", off, vregs_idx++);
 					break;
 			}
 			break;
@@ -857,8 +835,7 @@ static void emit_literal(Node *expr)
 				emit("%s db %s, 0", expr->slabel, expr->sval);
 				emit_noindent("\nsection .text");
 			}
-			emit("mov v%d %s", vregs_idx++, expr->slabel);
-			emit("mov vw%d %ld", vregs_idx, expr->slen);
+			emit("mov v%d %s", vregs_idx, expr->slabel);
 			break;
 		case AST_ARRAY:
 			break;
@@ -896,9 +873,7 @@ static void emit_load(int offset, char *base, int type)
 	switch (type)
 	{
 		case TYPE_STRING:
-			emit("mov v%d [%s-%d]", vregs_idx++, base, offset);
-			emit("mov v%d 0", vregs_idx);
-			emit("mov vw%d [%s-%d]", vregs_idx, base, offset+2);
+			emit("mov v%d [%s-%d]", vregs_idx, base, offset);
 			break;
 		case TYPE_ARRAY:
 			break;
@@ -928,7 +903,7 @@ static void emit_declaration(Node *n)
 	switch (n->lvar_valproppair->type)
 	{
 		case TYPE_STRING:
-			stack_offset += 10;
+			stack_offset += 8;
 			n->lvar_valproppair->loff = stack_offset;
 			break;
 		case TYPE_ARRAY:
@@ -980,28 +955,40 @@ static size_t emit_string_assign(Node *var, Node *string)
 {
 	if (string->type == AST_STRING || string->type == AST_IDENT || string->type == AST_IDX_ARRAY) {
 		emit_expr(string);
-		emit_store(var);
-		var->lvar_valproppair->slen = string->slen;
+		if (var) {
+			emit_store(var);
+			if (string->type == AST_STRING) {
+				var->lvar_valproppair->slen = string->slen;
+				return string->slen;
+			} else {
+				var->lvar_valproppair->slen = string->lvar_valproppair->slen;
+				return string->lvar_valproppair->slen;
+			}
+		} else {
+			if (string->type == AST_STRING) {
+				return string->slen;
+			} else {
+				return string->lvar_valproppair->slen;
+			}
+		}
 	} else {
 		size_t len = emit_string_arith_binop(string);
-		emit_store(var);
-		var->lvar_valproppair->slen = len;
+		if (var) {
+			emit_store(var);
+			var->lvar_valproppair->slen = len;
+		}
+		return len;
 	}
 }
 
 static size_t emit_string_arith_binop(Node *expr)
 {
-	emit_expr(expr->left);
-	int string1_len = vregs_idx;
-	int string1 = vregs_idx-1;
-	vregs_idx++;
+	size_t string1_len = emit_string_assign(NULL, expr->left);
+	int string1 = vregs_idx++;
+	size_t string2_len = emit_string_assign(NULL, expr->right);
+	int string2 = vregs_idx++;
 
-	emit_expr(expr->right);
-	int string2_len = vregs_idx;
-	int string2 = vregs_idx-1;
-	vregs_idx++;
-
-	size_t new_len = expr->left->lvar_valproppair->slen + expr->right->lvar_valproppair->slen;
+	size_t new_len = string1_len + string2_len;
 
 	char *new_string = makeLabel();
 
@@ -1024,26 +1011,24 @@ static size_t emit_string_arith_binop(Node *expr)
 	emit("add v%d v%d", new_string_reg, acc);
 	emit("mov [v%d] vb%d", new_string_reg, single_char);
 	emit("inc v%d", acc);
-	emit("cmp v%d v%d", acc, string1_len);
+	emit("cmp v%d %d", acc, string1_len);
 	emit("jne %s", loop1_label);
 
+	string2_len++;
 	emit("mov v%d 0", acc);
-	emit("inc v%d", string2_len);
 	emit_noindent("%s:", loop2_label);
 
 	emit("mov vb%d [v%d+v%d]", single_char, string2, acc);
 	emit("mov v%d %s", new_string_reg, new_string);
-	emit("add v%d v%d", new_string_reg, string1_len);
+	emit("add v%d %d", new_string_reg, string1_len);
 	emit("add v%d v%d", new_string_reg, acc);
 	emit("mov [v%d] vb%d", new_string_reg, single_char);
 	emit("inc v%d", acc);
-	emit("cmp v%d v%d", acc, string2_len);
+	emit("cmp v%d %d", acc, string2_len);
 	emit("jne %s", loop2_label);
-	emit("dec v%d", string2_len);
-	emit("add v%d v%d", string1_len, string2_len);
+	string2_len--;
 
-	emit("mov v%d %s", vregs_idx++, new_string);
-	emit("mov v%d v%d", vregs_idx, string1_len);
+	emit("mov v%d %s", vregs_idx, new_string);
 
 	return new_len;
 }
