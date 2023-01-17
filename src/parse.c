@@ -321,7 +321,7 @@ static int astToDatatype(int astType)
 	}
 }
 
-static int numPlaces (int n) 
+int numPlaces (int n)
 {
 	if (n < 0) n = (n == INT_MIN) ? INT_MAX : -n;
 	if (n < 10) return 1;
@@ -2488,10 +2488,10 @@ static void interpret_binary_int_expr(int l, Node *r_operand, Node *operator, St
 
 static void interpret_binary_string_expr(Node *r_operand, Node *operator, Stack *opstack, Stack *valstack)
 {
-	if (r_operand->type != AST_STRING) {
+	if (r_operand->type != AST_STRING && r_operand->type != AST_INT) {
 		ValPropPair *ident_pair = r_operand->lvar_valproppair;
 
-		if (ident_pair->type != TYPE_STRING) {
+		if (ident_pair->type != TYPE_STRING && ident_pair->type != TYPE_INT) {
 			c_error("Operands of binary operation must be of the same type.", -1);
 		}
 
@@ -2716,10 +2716,11 @@ static void interpret_binary_expr(Node *operator, Stack *opstack, Stack *valstac
 	Node *r_operand = (Node *) pop(opstack);
 	Node *l_operand = (Node *) pop(opstack);
 
+	/*
 	if ((r_operand->type != l_operand->type) && !( (r_operand->type == AST_IDENT || r_operand->type == AST_ARRAY || r_operand->type == AST_IDX_ARRAY)
 				|| (l_operand->type == AST_IDENT || l_operand->type == AST_ARRAY || l_operand->type == AST_IDX_ARRAY) )) {
 				c_error("Operands of binary operation must be of the same type.", -1);
-	}
+	} */
 
 	switch (l_operand->type)
 	{

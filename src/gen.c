@@ -971,6 +971,18 @@ static size_t emit_string_assign(Node *var, Node *string)
 				return string->lvar_valproppair->slen;
 			}
 		}
+	} else if (string->type == AST_INT) {
+		int ndigits = numPlaces(string->ival);
+		int ival = string->ival;
+
+		string->type = AST_STRING;
+		string->sval = malloc(ndigits + 3);
+		sprintf(string->sval, "\"%d\"", ival);
+		string->slen = ndigits;
+
+		emit_expr(string);
+
+		return ndigits;
 	} else {
 		size_t len = emit_string_arith_binop(string);
 		if (var) {
@@ -993,7 +1005,7 @@ static size_t emit_string_arith_binop(Node *expr)
 	char *new_string = makeLabel();
 
 	emit_noindent("section .bss");
-	emit("%s resb %d", new_string, new_len);
+	emit("%s resb %d", new_string, new_len+1);
 	emit_noindent("section .text");
 
 	char *loop1_label = makeLabel();
@@ -1012,7 +1024,7 @@ static size_t emit_string_arith_binop(Node *expr)
 	emit("mov [v%d] vb%d", new_string_reg, single_char);
 	emit("inc v%d", acc);
 	emit("cmp v%d %d", acc, string1_len);
-	emit("jne %s", loop1_label);
+	emit("jl %s", loop1_label);
 
 	string2_len++;
 	emit("mov v%d 0", acc);
@@ -1025,7 +1037,7 @@ static size_t emit_string_arith_binop(Node *expr)
 	emit("mov [v%d] vb%d", new_string_reg, single_char);
 	emit("inc v%d", acc);
 	emit("cmp v%d %d", acc, string2_len);
-	emit("jne %s", loop2_label);
+	emit("jl %s", loop2_label);
 	string2_len--;
 
 	emit("mov v%d %s", vregs_idx, new_string);
