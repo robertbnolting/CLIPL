@@ -2488,10 +2488,10 @@ static void interpret_binary_int_expr(int l, Node *r_operand, Node *operator, St
 
 static void interpret_binary_string_expr(Node *r_operand, Node *operator, Stack *opstack, Stack *valstack)
 {
-	if (r_operand->type != AST_STRING && r_operand->type != AST_INT) {
+	if (r_operand->type != AST_STRING) {
 		ValPropPair *ident_pair = r_operand->lvar_valproppair;
 
-		if (ident_pair->type != TYPE_STRING && ident_pair->type != TYPE_INT) {
+		if (ident_pair->type != TYPE_STRING) {
 			c_error("Operands of binary operation must be of the same type.", -1);
 		}
 
@@ -2941,6 +2941,13 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 		}
 		case AST_WHILE_STMT:
 			interpret_expr(expr->while_true_successor, opstack, valstack);
+			interpret_expr(expr->successor, opstack, valstack);
+			break;
+		case AST_FOR_STMT:
+			interpret_expr(expr->for_enum, opstack, valstack);
+			interpret_expr(expr->for_iterator, opstack, valstack);
+			expr->for_iterator->lvar_valproppair->status = 1;
+			interpret_expr(expr->for_loop_successor, opstack, valstack);
 			interpret_expr(expr->successor, opstack, valstack);
 			break;
 	}

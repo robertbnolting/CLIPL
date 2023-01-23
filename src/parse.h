@@ -207,3 +207,4 @@ typedef struct Node {
 } Node;
 
 void parser_init();
+int numPlaces();

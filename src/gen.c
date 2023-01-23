@@ -43,9 +43,11 @@ static void emit_literal();
 static void emit_declaration();
 static void emit_assign();
 static void emit_store();
+static void emit_store_offset();
 static void emit_lvar();
 static void emit_if();
 static void emit_while();
+static void emit_for();
 static int emit_array_assign();
 static int emit_offset_assign();
 static size_t emit_string_assign();
@@ -55,7 +57,7 @@ static void emit_syscall();
 static int do_array_arithmetic();
 
 static int **getArrayMembers();
-static int get_idx_offset();
+static int *getArraySizes();
 
 static InterferenceNode **lva();
 static void sortByColor();
@@ -458,6 +460,7 @@ void gen(Node **funcs, size_t n_funcs)
 {
 	entrypoint_defined = 0;
 	s_regs_count = 0;
+
 	for (int i = 0; i < n_funcs; i++) {
 		emit_func_prologue(funcs[i]);
 	}
@@ -505,12 +508,12 @@ void gen(Node **funcs, size_t n_funcs)
 	fprintf(outputfp, outputbuf);
 }
 
-void push(char *reg)
+static void push(char *reg)
 {
 	emit("push %s", reg);
 }
 
-void pop(char *reg)
+static void pop(char *reg)
 {
 	emit("pop %s", reg);
 }
@@ -588,6 +591,11 @@ static void emit_block(Node **block, size_t sz)
 	}
 }
 
+static void emit_store_offset(int offset)
+{
+	emit("mov [rbp-%d] vd%d", offset, vregs_idx++);
+}
+
 static void emit_store(Node *n)
 {
 	switch (n->type)
@@ -600,12 +608,12 @@ static void emit_store(Node *n)
 				default:
 					stack_offset += 4;
 					n->lvar_valproppair->loff = stack_offset;
-					emit("mov [rbp-%d] vd%d", stack_offset, vregs_idx++);
+					emit_store_offset(stack_offset);
 					break;
 				case TYPE_STRING:
 					stack_offset += 8;
 					n->lvar_valproppair->loff = stack_offset;
-					emit("mov [rbp-%d] vd%d", stack_offset, vregs_idx++);
+					emit_store_offset(stack_offset);
 					break;
 			}
 			break;
@@ -615,10 +623,10 @@ static void emit_store(Node *n)
 			{
 				case TYPE_INT:
 				default:
-					emit("mov [rbp-%d] vd%d", off, vregs_idx++);
+					emit_store_offset(off);
 					break;
 				case TYPE_STRING:
-					emit("mov [rbp-%d] vd%d", off, vregs_idx++);
+					emit_store_offset(off);
 					break;
 			}
 			break;
@@ -818,6 +826,25 @@ static int do_array_arithmetic(Node *expr, Node *var)
 	}
 }
 
+static int *getArraySizes(Node *array, int dims)
+{
+	int *sizes = malloc(dims * sizeof(int));
+
+	if (dims == 0) {
+		return NULL;
+	} else {
+		sizes[0] = array->array_size;
+	}
+	
+	int *next_sizes = getArraySizes(array->array_elems[0], dims-1);
+
+	if (next_sizes) {
+		memcpy(&sizes[1], next_sizes, dims-1);
+	}
+
+	return sizes;
+}
+
 static void emit_literal(Node *expr)
 {
 	switch (expr->type)
@@ -953,7 +980,8 @@ static void emit_int_arith_binop(Node *expr)
 
 static size_t emit_string_assign(Node *var, Node *string)
 {
-	if (string->type == AST_STRING || string->type == AST_IDENT || string->type == AST_IDX_ARRAY) {
+	if (string->type == AST_STRING || (string->type == AST_IDENT && string->lvar_valproppair->type == AST_STRING) 
+	    || string->type == AST_IDX_ARRAY) {
 		emit_expr(string);
 		if (var) {
 			emit_store(var);
@@ -971,18 +999,6 @@ static size_t emit_string_assign(Node *var, Node *string)
 				return string->lvar_valproppair->slen;
 			}
 		}
-	} else if (string->type == AST_INT) {
-		int ndigits = numPlaces(string->ival);
-		int ival = string->ival;
-
-		string->type = AST_STRING;
-		string->sval = malloc(ndigits + 3);
-		sprintf(string->sval, "\"%d\"", ival);
-		string->slen = ndigits;
-
-		emit_expr(string);
-
-		return ndigits;
 	} else {
 		size_t len = emit_string_arith_binop(string);
 		if (var) {
@@ -1112,6 +1128,15 @@ static void op(Node *expr)
 	}
 }
 
+static void emit_func_call(Node *n)
+{
+	int idx = n->global_function_idx;
+
+	if (idx < 0) {
+		emit_syscall(n->callargs, n->n_args);
+	}
+}
+
 static void emit_if(Node *n)
 {
 	char *cont_label = makeLabel();
@@ -1148,25 +1173,69 @@ static void emit_while(Node *n)
 	emit("je %s", body_label);
 }
 
-static void emit_func_call(Node *n)
+static void emit_for(Node *n)
 {
-	int idx = n->global_function_idx;
+#define for_enum (n->for_enum)
+#define for_it (n->for_iterator)
+	int saved_stack = stack_offset;
+	int enum_off;
+	int *sizes = getArraySizes(for_enum, for_enum->array_dims);
 
-	if (idx < 0) {
-		/*
-		if (n->n_args < 2) {
-			c_error("Invalid syscall expression. Correct usage is: syscall(NR, arg0, ...)", -1);
-		}
-		int args[n->n_args];
-		for (int i = 0; i < n->n_args; i++) {
-			// TODO: resolve syscall args to int values
-			args[i] = n->callargs[i]->ival;
+	if (for_enum->lvar_valproppair) {
+		return;
+	} else {
+
+		int acc = 1;
+		for (int i = 0; i < for_enum->array_dims; i++) {
+			acc *= sizes[i];
 		}
 
-		emit_syscall(args[0], n->n_args-1, &args[1]);
-		*/
-		emit_syscall(n->callargs, n->n_args);
+		stack_offset += 4 * acc;
+
+		enum_off = stack_offset;
+
+		size_t array_len = 0;
+		emit_offset_assign(for_enum->array_dims, sizes, &array_len, &for_enum->array_elems, stack_offset, for_enum);
 	}
+
+	char *loop_label = makeLabel();
+	int acc = vregs_idx++;
+	int len = vregs_idx++;
+	int idx = vregs_idx++;
+
+	emit_declaration(for_it);
+
+	emit("mov vd%d 0", acc);
+	emit("mov vd%d 0", idx);
+	emit("mov vd%d %d", len, for_enum->array_size);
+	emit_noindent("%s:", loop_label);
+
+	int sizeacc = 1;
+	for (int i = 0; i < for_it->v_array_dimensions; i++) {
+		i *= sizes[i];
+	}
+
+	// TODO: the indexed value must be available as a normal variable in the loop body
+	//	 and change value every iteration
+
+	emit("mov vd%d 0", idx);
+	emit("lea vd%d [vd%d*%d*4]", idx, acc, sizeacc);
+
+	emit("add rbp v%d", idx);
+	emit("mov vd%d [rbp-%d]", vregs_idx, enum_off);
+	emit("sub rbp v%d", idx);
+
+	emit_store_offset(for_it->lvar_valproppair->loff);
+
+	emit_block(n->for_body, n->n_for_stmts);
+
+	emit("inc vd%d", acc);
+	emit("cmp vd%d vd%d", acc, len);
+	emit("jl %s", loop_label);
+
+	stack_offset = saved_stack;
+#undef for_enum
+#undef for_it
 }
 
 static void emit_ret()
@@ -1207,6 +1276,9 @@ static void emit_expr(Node *expr)
 			break;
 		case AST_WHILE_STMT:
 			emit_while(expr);
+			break;
+		case AST_FOR_STMT:
+			emit_for(expr);
 			break;
 		case AST_FUNCTION_CALL:
 			emit_func_call(expr);
