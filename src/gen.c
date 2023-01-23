@@ -1194,11 +1194,14 @@ static void emit_for(Node *n)
 #define for_it (n->for_iterator)
 	int saved_stack = stack_offset;
 	int enum_off;
-	int *sizes = getArraySizes(for_enum, for_enum->array_dims);
 
-	if (for_enum->lvar_valproppair) {
-		return;
+	int *sizes;
+
+	if (for_enum->type == AST_IDENT) {
+		enum_off = for_enum->lvar_valproppair->loff;
+		sizes = for_enum->lvar_valproppair->array_size;
 	} else {
+		sizes = getArraySizes(for_enum, for_enum->array_dims);
 
 		int acc = 1;
 		for (int i = 0; i < for_enum->array_dims; i++) {
@@ -1222,16 +1225,13 @@ static void emit_for(Node *n)
 
 	emit("mov vd%d 0", acc);
 	emit("mov vd%d 0", idx);
-	emit("mov vd%d %d", len, for_enum->array_size);
+	emit("mov vd%d %d", len, sizes[0]);
 	emit_noindent("%s:", loop_label);
 
 	int sizeacc = 1;
 	for (int i = 0; i < for_it->v_array_dimensions; i++) {
 		i *= sizes[i];
 	}
-
-	// TODO: the indexed value must be available as a normal variable in the loop body
-	//	 and change value every iteration
 
 	emit("mov vd%d 0", idx);
 	emit("lea vd%d [vd%d*%d*4]", idx, acc, sizeacc);
