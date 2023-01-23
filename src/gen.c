@@ -1063,42 +1063,57 @@ static size_t emit_string_arith_binop(Node *expr)
 
 static void emit_comp_binop(Node *expr)
 {
-	emit_expr(expr->left);
-	int l_idx = vregs_idx;
-	vregs_idx++;
-	emit_expr(expr->right);
-
-	emit("cmp vd%d vd%d", l_idx, vregs_idx++);
 	char *false_label = makeLabel();
 	char *cont_label = makeLabel();
 
-	switch (expr->type)
-	{
-	case AST_EQ:
-		emit("jne %s", false_label);
-		break;
-	case AST_NE:
-		emit("je %s", false_label);
-		break;
-	case AST_LT:
-		emit("jge %s", false_label);
-		break;
-	case AST_LE:
-		emit("jg %s", false_label);
-		break;
-	case AST_GT:
-		emit("jle %s", false_label);
-		break;
-	case AST_GE:
-		emit("jl %s", false_label);
-		break;
-	}
+	if (expr->type == AST_BOOL) {
+		if (expr->bval) {
+			emit("mov vd%d 1", vregs_idx);
+		} else {
+			emit("mov vd%d 0", vregs_idx);
+		}
+	} else {
+		if (expr->type == AST_IDENT) {
+			emit_expr(expr);
+			emit("cmp vd%d 1", vregs_idx++);
+			emit("jne %s", false_label);
+		} else {
+			emit_expr(expr->left);
+			int l_idx = vregs_idx;
+			vregs_idx++;
+			emit_expr(expr->right);
 
-	emit("mov vd%d 1", vregs_idx);
-	emit("jmp %s", cont_label);
-	emit_noindent("%s:", false_label);
-	emit("mov vd%d 0", vregs_idx);
-	emit_noindent("%s:", cont_label);
+			emit("cmp vd%d vd%d", l_idx, vregs_idx++);
+
+			switch (expr->type)
+			{
+			case AST_EQ:
+				emit("jne %s", false_label);
+				break;
+			case AST_NE:
+				emit("je %s", false_label);
+				break;
+			case AST_LT:
+				emit("jge %s", false_label);
+				break;
+			case AST_LE:
+				emit("jg %s", false_label);
+				break;
+			case AST_GT:
+				emit("jle %s", false_label);
+				break;
+			case AST_GE:
+				emit("jl %s", false_label);
+				break;
+			}
+		}
+
+		emit("mov vd%d 1", vregs_idx);
+		emit("jmp %s", cont_label);
+		emit_noindent("%s:", false_label);
+		emit("mov vd%d 0", vregs_idx);
+		emit_noindent("%s:", cont_label);
+	}
 }
 
 static void op(Node *expr)
