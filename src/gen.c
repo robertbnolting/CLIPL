@@ -110,6 +110,8 @@ static int is_instruction_mnemonic(char *mnem)
 		return ADD;
 	} else if (MATCHES("sub")) {
 		return SUB; 
+	} else if (MATCHES("imul")) {
+		return IMUL;
 	} else if (MATCHES("and")) {
 		return AND;
 	} else if (MATCHES("shr")) {
@@ -839,7 +841,7 @@ static int *getArraySizes(Node *array, int dims)
 	int *next_sizes = getArraySizes(array->array_elems[0], dims-1);
 
 	if (next_sizes) {
-		memcpy(&sizes[1], next_sizes, dims-1);
+		memcpy(&sizes[1], next_sizes, (dims-1) * sizeof(int));
 	}
 
 	return sizes;
@@ -1230,17 +1232,30 @@ static void emit_for(Node *n)
 
 	int sizeacc = 1;
 	for (int i = 0; i < for_it->v_array_dimensions; i++) {
-		i *= sizes[i];
+		sizeacc *= for_it->varray_size[i];
 	}
 
-	emit("mov vd%d 0", idx);
-	emit("lea vd%d [vd%d*%d*4]", idx, acc, sizeacc);
+	emit("lea vd%d [vd%d*4]", idx, acc);
+	emit("imul vd%d %d", idx, sizeacc);
 
-	emit("add rbp v%d", idx);
-	emit("mov vd%d [rbp-%d]", vregs_idx, enum_off);
-	emit("sub rbp v%d", idx);
+	if (!for_it->v_array_dimensions) {
+		emit("add rbp v%d", idx);
+		emit("mov vd%d [rbp-%d]", vregs_idx, enum_off);
+		emit("sub rbp v%d", idx);
+		emit_store_offset(for_it->lvar_valproppair->loff);
+	} else {
+		int it_sizes = 1;
+		for (int i = 0; i < for_it->v_array_dimensions; i++) {
+			it_sizes *= for_it->varray_size[i];
+		}
 
-	emit_store_offset(for_it->lvar_valproppair->loff);
+		for (int i = 0; i < it_sizes; i++) {
+			emit("add rbp v%d", idx);
+			emit("mov vd%d [rbp-%d]", vregs_idx, enum_off-(i*4));
+			emit("sub rbp v%d", idx);
+			emit("mov dword [rbp-%d] vd%d", for_it->lvar_valproppair->loff-(i*4), vregs_idx);
+		}
+	}
 
 	emit_block(n->for_body, n->n_for_stmts);
 

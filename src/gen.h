@@ -5,6 +5,7 @@ enum MnemType {
 	LEA,
 	ADD,
 	SUB,
+	IMUL,
 	AND,
 	OR,
 	SHR,
