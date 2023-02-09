@@ -50,7 +50,7 @@ static void emit_while();
 static void emit_for();
 static int emit_array_assign();
 static int emit_offset_assign();
-static size_t emit_string_assign();
+static size_t *emit_string_assign();
 static size_t emit_string_arith_binop();
 static void emit_syscall();
 
@@ -255,6 +255,12 @@ MnemNode *makeMnemNode(char *mnem)
 	r->vregs_used = NULL;
 	r->n_vregs_used = 0;
 
+	if (mnem[0] == '\n') {
+		r->type = NEWLINE;
+		r->mnem = "\n";
+		return r;
+	}
+
 	int off = 0;
 	if (mnem[0] == '\t') {
 		off = 1;
@@ -306,6 +312,8 @@ MnemNode *makeMnemNode(char *mnem)
 		} else if (mnem_p[off] == '\'' || mnem_p[off] == '"') {
 			type = LITERAL;
 		} else if (!strcmp(mnem_p+1, "word")) {
+			type = SPECIFIER;
+		} else if (!strcmp(mnem_p, "byte")) {
 			type = SPECIFIER;
 		} else if (!strcmp(&mnem_p[off], "syscall")) {
 			type = SYSCALL;
@@ -370,7 +378,6 @@ static void emitf(char *fmt, ...) {
 	va_start(args, fmt);
 	vsprintf(&tmpbuf[0], buf, args);
 	va_end(args);
-	strcat(&tmpbuf[0], "\n");
 
 	char mnem[50] = {0};
 	size_t mnem_len = 0;
@@ -381,8 +388,14 @@ static void emitf(char *fmt, ...) {
 
 	int counter = 0;
 	// pseudo-asm parser
-	while (c = tmpbuf[counter++]) {
-		if (c == ' ' || c == '\n') {
+	for (;;) {
+		c = tmpbuf[counter++];
+		if (c == ' ' || c == '\0' || c == '\n') {
+			if (c == '\n') {
+				ins_array = realloc(ins_array, (ins_array_sz+1) * sizeof(MnemNode *));
+				ins_array[ins_array_sz++] = makeMnemNode("\n");
+				break;
+			}
 			if (is_instruction_mnemonic(mnem)) {
 				ins = makeMnemNode(&mnem[0]);
 				prev_ins = 1;
@@ -401,8 +414,9 @@ static void emitf(char *fmt, ...) {
 						ins_array = realloc(ins_array, (ins_array_sz+1) * sizeof(MnemNode *));
 						ins_array[ins_array_sz++] = ins;
 						ins = NULL;
+						break;
 					} else if (is_assignment_mnemonic(ins->mnem) && ins->left) {
-						if (ins->left->type == VIRTUAL_REG/* || ins->left->type == REAL_REG*/) {
+						if (ins->left->type == VIRTUAL_REG) {
 							int i;
 							for (i = 0; i < vregs_sz; i++) {
 								if (vregs[i] == ins->left->idx) {
@@ -426,14 +440,16 @@ static void emitf(char *fmt, ...) {
 
 					if (ins->right) {
 						ins_array = realloc(ins_array, (ins_array_sz+1) * sizeof(MnemNode *));
-						ins_array[ins_array_sz++] = ins; ins = NULL;
+						ins_array[ins_array_sz++] = ins; 
+						ins = NULL;
+						break;
 					}
 				}
 
 				clear(mnem);
 				mnem_len = 0;
 			} else {
-				if (c == '\n') {
+				if (c == '\0') {
 					MnemNode *other = makeMnemNode(&mnem[0]);
 					if (other) {
 						ins_array = realloc(ins_array, (ins_array_sz+1) * sizeof(MnemNode *));
@@ -441,21 +457,16 @@ static void emitf(char *fmt, ...) {
 						prev_ins = 0;
 						clear(mnem);
 						mnem_len = 0;
+						break;
 					}
 				} else {
 					mnem[mnem_len++] = c;
 				}
 			}
-		} else {// if (c != ',' || (c == ',' && (mnem[mnem_len-1] >= '0' && mnem[mnem_len-1] <= '9'))) {
+		} else {
 			mnem[mnem_len++] = c;
 		}
 	}
-
-#if 0
-	outputbuf_sz += strlen(tmpbuf);
-	outputbuf = realloc(outputbuf, outputbuf_sz+1);
-	strcat(outputbuf, &tmpbuf[0]);
-#endif
 }
 
 void gen(Node **funcs, size_t n_funcs)
@@ -497,8 +508,11 @@ void gen(Node **funcs, size_t n_funcs)
 		} else if (ins_array[i]->type == LABEL) {
 			strcpy(tmpbuf, ins_array[i]->mnem);
 			strcat(tmpbuf, ":\n");
+		} else if (ins_array[i]->type == NEWLINE) {
+			strcpy(tmpbuf, "\n");
 		} else {
-			strcpy(tmpbuf, ins_array[i]->mnem); strcat(tmpbuf, "\n");
+			strcpy(tmpbuf, ins_array[i]->mnem);
+			strcat(tmpbuf, "\n");
 		}
 
 		outputbuf_sz += strlen(tmpbuf);
@@ -536,11 +550,22 @@ static void emit_syscall(Node **args, size_t n_args)
 			emit("mov rax v%d", vregs_idx++);
 		} else {
 			emit_expr(args[i]);
-			emit("mov %s v%d", regs[i-1], vregs_idx++);
+			if (args[i]->type == AST_IDENT) {
+				if (args[i]->lvar_valproppair->type == AST_STRING) {
+					emit("mov %s v%d", regs[i-1], vregs_idx-1);
+					vregs_idx++;
+				}
+			} else if (args[i]->type == AST_STRING) {
+				emit("mov %s v%d", regs[i-1], vregs_idx-1);
+				vregs_idx++;
+			} else {
+				emit("mov %s v%d", regs[i-1], vregs_idx++);
+			}
 		}
 	}
 
 	emit("syscall");
+	emit("\n");
 }
 
 static void push_func_params(Node **params, size_t nparams)
@@ -593,9 +618,22 @@ static void emit_block(Node **block, size_t sz)
 	}
 }
 
-static void emit_store_offset(int offset)
+static void emit_store_offset(int offset, int type)
 {
-	emit("mov [rbp-%d] vd%d", offset, vregs_idx++);
+	switch (type)
+	{
+		case TYPE_INT:
+			emit("mov [rbp-%d] vd%d", offset, vregs_idx++);
+			break;
+		case TYPE_STRING:
+			emit("mov [rbp-%d] v%d", offset-4, vregs_idx-1);
+			emit("mov [rbp-%d] vd%d", offset, vregs_idx);
+			//emit("lea v%d [rbp-%d]", vregs_idx++, offset);
+			emit("\n");
+			break;
+		default:
+			printf("Type not implemented.\n");
+	}
 }
 
 static void emit_store(Node *n)
@@ -610,12 +648,12 @@ static void emit_store(Node *n)
 				default:
 					stack_offset += 4;
 					n->lvar_valproppair->loff = stack_offset;
-					emit_store_offset(stack_offset);
+					emit_store_offset(stack_offset, TYPE_INT);
 					break;
 				case TYPE_STRING:
-					stack_offset += 8;
+					stack_offset += 12;
 					n->lvar_valproppair->loff = stack_offset;
-					emit_store_offset(stack_offset);
+					emit_store_offset(stack_offset, TYPE_STRING);
 					break;
 			}
 			break;
@@ -625,10 +663,10 @@ static void emit_store(Node *n)
 			{
 				case TYPE_INT:
 				default:
-					emit_store_offset(off);
+					emit_store_offset(off, TYPE_INT);
 					break;
 				case TYPE_STRING:
-					emit_store_offset(off);
+					emit_store_offset(off, TYPE_STRING);
 					break;
 			}
 			break;
@@ -860,11 +898,14 @@ static void emit_literal(Node *expr)
 		case AST_STRING:
 			if (!expr->slabel) {
 				expr->slabel = makeLabel();
-				emit_noindent("\nsection .data");
+				emit("\n");
+				emit_noindent("section .data");
 				emit("%s db %s, 0", expr->slabel, expr->sval);
-				emit_noindent("\nsection .text");
+				emit("\n");
+				emit_noindent("section .text");
 			}
-			emit("mov v%d %s", vregs_idx, expr->slabel);
+			emit("mov v%d %s", vregs_idx++, expr->slabel);
+			emit("mov v%d %d", vregs_idx, expr->slen);
 			break;
 		case AST_ARRAY:
 			break;
@@ -902,7 +943,8 @@ static void emit_load(int offset, char *base, int type)
 	switch (type)
 	{
 		case TYPE_STRING:
-			emit("mov v%d [%s-%d]", vregs_idx, base, offset);
+			emit("mov v%d [%s-%d]", vregs_idx++, base, offset-4);
+			emit("lea v%d [%s-%d]", vregs_idx, base, offset);
 			break;
 		case TYPE_ARRAY:
 			break;
@@ -980,25 +1022,39 @@ static void emit_int_arith_binop(Node *expr)
 	emit("%s vd%d vd%d", op, vregs_idx, saved_idx);
 }
 
-static size_t emit_string_assign(Node *var, Node *string)
+static size_t *emit_string_assign(Node *var, Node *string)
 {
-	if (string->type == AST_STRING || (string->type == AST_IDENT && string->lvar_valproppair->type == AST_STRING) 
+	if (string->type == AST_STRING || (string->type == AST_IDENT && string->lvar_valproppair->type == AST_STRING)
 	    || string->type == AST_IDX_ARRAY) {
 		emit_expr(string);
 		if (var) {
 			emit_store(var);
 			if (string->type == AST_STRING) {
 				var->lvar_valproppair->slen = string->slen;
-				return string->slen;
+				var->lvar_valproppair->s_allocated = string->s_allocated;
+				size_t *pair = malloc(sizeof(size_t) * 2);
+				pair[0] = string->slen;
+				pair[1] = string->s_allocated;
+				return pair;
 			} else {
 				var->lvar_valproppair->slen = string->lvar_valproppair->slen;
-				return string->lvar_valproppair->slen;
+				var->lvar_valproppair->s_allocated = string->lvar_valproppair->s_allocated;
+				size_t *pair = malloc(sizeof(size_t) * 2);
+				pair[0] = string->lvar_valproppair->slen;
+				pair[1] = string->lvar_valproppair->s_allocated;
+				return pair;
 			}
 		} else {
 			if (string->type == AST_STRING) {
-				return string->slen;
+				size_t *pair = malloc(sizeof(size_t) * 2);
+				pair[0] = string->slen;
+				pair[1] = string->s_allocated;
+				return pair;
 			} else {
-				return string->lvar_valproppair->slen;
+				size_t *pair = malloc(sizeof(size_t) * 2);
+				pair[0] = string->lvar_valproppair->slen;
+				pair[1] = string->lvar_valproppair->s_allocated;
+				return pair;
 			}
 		}
 	} else {
@@ -1007,18 +1063,35 @@ static size_t emit_string_assign(Node *var, Node *string)
 			emit_store(var);
 			var->lvar_valproppair->slen = len;
 		}
-		return len;
+		size_t *pair = malloc(sizeof(size_t) * 2);
+		pair[0] = len;
+		pair[1] = 0;
+		return pair;
 	}
 }
 
 static size_t emit_string_arith_binop(Node *expr)
 {
-	size_t string1_len = emit_string_assign(NULL, expr->left);
-	int string1 = vregs_idx++;
-	size_t string2_len = emit_string_assign(NULL, expr->right);
-	int string2 = vregs_idx++;
+	size_t *string1_pair = emit_string_assign(NULL, expr->left);
+	size_t string1_len = string1_pair[0];
+	int string1 = vregs_idx-1;
+	int string1_end = vregs_idx++;
 
-	size_t new_len = string1_len + string2_len;
+	size_t *string2_pair = emit_string_assign(NULL, expr->right);
+	size_t string2_len = string2_pair[0];
+	int string2 = vregs_idx-1;
+	int string2_end = vregs_idx++;
+
+	size_t new_len;
+	if (string1_pair[1] && string2_pair[1]) {
+		new_len = string1_pair[1] + string2_pair[1];
+	} else if (string1_pair[1] && !string2_pair[1]) {
+		new_len = string1_pair[1] + string2_len;
+	} else if (!string1_pair[1] && string2_pair[1]) {
+		new_len = string1_len + string2_pair[1];
+	} else {
+		new_len = string1_len + string2_len;
+	}
 
 	char *new_string = makeLabel();
 
@@ -1033,6 +1106,7 @@ static size_t emit_string_arith_binop(Node *expr)
 	int single_char = vregs_idx++;
 	int new_string_reg = vregs_idx++;
 
+	emit("\n");
 	emit("mov v%d 0", acc);
 	emit_noindent("%s:", loop1_label);
 
@@ -1045,20 +1119,29 @@ static size_t emit_string_arith_binop(Node *expr)
 	emit("jl %s", loop1_label);
 
 	string2_len++;
+	emit("\n");
 	emit("mov v%d 0", acc);
 	emit_noindent("%s:", loop2_label);
 
 	emit("mov vb%d [v%d+v%d]", single_char, string2, acc);
 	emit("mov v%d %s", new_string_reg, new_string);
-	emit("add v%d %d", new_string_reg, string1_len);
 	emit("add v%d v%d", new_string_reg, acc);
+
+	emit("mov vd%d [v%d]", vregs_idx, string1_end);
+	emit("add v%d v%d", new_string_reg, vregs_idx++);
+
 	emit("mov [v%d] vb%d", new_string_reg, single_char);
+
+	emit("\n");
+
 	emit("inc v%d", acc);
 	emit("cmp v%d %d", acc, string2_len);
 	emit("jl %s", loop2_label);
 	string2_len--;
 
-	emit("mov v%d %s", vregs_idx, new_string);
+	emit("mov v%d %s", vregs_idx++, new_string);
+	emit("add dword [v%d] %d", string1_end, string2_len);
+	emit("mov vd%d [v%d]", vregs_idx, string1_end);
 
 	return new_len;
 }
@@ -1202,7 +1285,7 @@ static void emit_for(Node *n)
 	if (for_enum->type == AST_IDENT) {
 		enum_off = for_enum->lvar_valproppair->loff;
 		sizes = for_enum->lvar_valproppair->array_size;
-	} else {
+	} else if (for_enum->type == AST_ARRAY) {
 		sizes = getArraySizes(for_enum, for_enum->array_dims);
 
 		int acc = 1;
@@ -1216,6 +1299,39 @@ static void emit_for(Node *n)
 
 		size_t array_len = 0;
 		emit_offset_assign(for_enum->array_dims, sizes, &array_len, &for_enum->array_elems, stack_offset, for_enum);
+	} else {
+		char *loop_label = makeLabel();
+		int acc = vregs_idx++;
+		int len = vregs_idx++;
+
+		emit_expr(for_enum);
+		int string = vregs_idx++;
+
+		emit_declaration(for_it);
+
+		emit("mov vd%d 0", acc);
+		emit("mov vd%d %d", len, for_enum->slen);
+		emit_noindent("%s:", loop_label);
+
+		emit("mov vb%d [v%d+v%d]", vregs_idx, string, acc);
+
+		stack_offset += 2;
+		emit("mov [rbp-%d] vb%d", stack_offset, vregs_idx);
+		emit("mov byte [rbp-%d] 0", stack_offset-1);
+		emit("sub rbp %d", stack_offset);
+		emit("mov v%d rbp", vregs_idx);
+		emit("add rbp %d", stack_offset);
+
+		emit_store_offset(for_it->lvar_valproppair->loff, for_it->vtype);
+
+		emit_block(n->for_body, n->n_for_stmts);
+
+		emit("inc vd%d", acc);
+		emit("cmp vd%d vd%d", acc, len);
+		emit("jl %s", loop_label);
+
+		stack_offset = saved_stack;
+		return;
 	}
 
 	char *loop_label = makeLabel();
@@ -1242,7 +1358,7 @@ static void emit_for(Node *n)
 		emit("add rbp v%d", idx);
 		emit("mov vd%d [rbp-%d]", vregs_idx, enum_off);
 		emit("sub rbp v%d", idx);
-		emit_store_offset(for_it->lvar_valproppair->loff);
+		emit_store_offset(for_it->lvar_valproppair->loff, for_it->vtype);
 	} else {
 		int it_sizes = 1;
 		for (int i = 0; i < for_it->v_array_dimensions; i++) {
@@ -1437,7 +1553,7 @@ static InterferenceNode **lva()
 						}
 					}
 				}
-			} else if (n->type > MOV && n->type <= POP) { // instruction but not mov
+			} else if (n->type > LEA && n->type <= POP) { // instruction but not mov/lea
 				if (n->type <= CMP) {	// is binary operation
 					if (n->right->type == VIRTUAL_REG || n->right->type == REAL_REG) {
 						live = addToLiveRange(n->right->idx, live, &live_sz);
@@ -1463,7 +1579,7 @@ static InterferenceNode **lva()
 					for (int i = 0; i < n->left->n_vregs_used; i++) {
 						live = addToLiveRange(n->left->vregs_used[i]->idx, live, &live_sz);
 						if (saved != live_sz) {
-							used_vregs[n->right->vregs_used[i]->idx] = 1;
+							used_vregs[n->left->vregs_used[i]->idx] = 1;
 							used_vregs_n++;
 						}
 					}
@@ -1494,6 +1610,8 @@ static InterferenceNode **lva()
 				live = addToLiveRange(8, live, &live_sz); // r10
 				live = addToLiveRange(6, live, &live_sz); // r8
 				live = addToLiveRange(7, live, &live_sz); // r9
+				live = addToLiveRange(2, live, &live_sz); // rcx
+				live = addToLiveRange(9, live, &live_sz); // r11
 
 				if (p == 0) {
 					syscall_list = realloc(syscall_list, sizeof(int) * (syscall_list_sz + 1));

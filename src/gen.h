@@ -33,6 +33,7 @@ enum MnemType {
 	LITERAL,
 	SPECIFIER,
 	SYSCALL,
+	NEWLINE,
 };
 
 typedef struct MnemNode {

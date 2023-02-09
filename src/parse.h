@@ -74,6 +74,7 @@ typedef struct ValPropPair {
 		struct {
 			char *sval;
 			size_t slen;
+			int s_allocated;
 		};
 		float fval;
 		int bval;
@@ -110,6 +111,7 @@ typedef struct Node {
 			size_t slen;
 			// used in generation
 			char *slabel;
+			int s_allocated;
 		};
 		// bool
 		int bval;

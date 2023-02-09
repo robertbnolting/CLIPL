@@ -805,9 +805,9 @@ static Node *ast_identtype(char *n)
 	return makeNode(&(Node){AST_IDENT, .name = n});
 }
 
-static Node *ast_stringtype(char *val, size_t len)
+static Node *ast_stringtype(char *val, size_t len, int alloc)
 {
-	return makeNode(&(Node){AST_STRING, .sval = val, .slen = len});
+	return makeNode(&(Node){AST_STRING, .sval = val, .slen = len, .s_allocated=alloc});
 }
 
 static Node *ast_booltype(int val)
@@ -1599,6 +1599,8 @@ static Node *read_enumerable_expr()
 	Token_type *tok = get();
 	if (tok->class == '[') {
 		r = read_array_expr();
+	} else if (tok->class == STRING) {
+		r = read_string(tok);
 	} else {
 		r = read_ident(tok, 0);
 	}
@@ -1664,7 +1666,19 @@ static Node *read_string(Token_type *tok)
 
 	len -= 2;	// to account for ""
 
-	return ast_stringtype(s, len);
+	if (next_token(':')) {
+		Token_type *tok = get();
+		if (tok->class != INT) {
+			c_error("Integer expected after string-allocation operator ':'.", tok->line);
+		}
+
+		char *end;
+		int alloc = strncasecmp(tok->repr, "0b", 2) ? strtol(tok->repr, &end, 0) : strtol(tok->repr, &end, 2);
+
+		return ast_stringtype(s, len, alloc);
+	}
+
+	return ast_stringtype(s, len, 0);
 }
 
 static Node *read_bool(Token_type *tok)
@@ -2238,6 +2252,7 @@ static void interpret_assignment_expr(Node *expr, Stack *opstack, Stack *valstac
 			case AST_STRING:
 				checkDataType(pair, TYPE_STRING);
 				pair->sval = rhs->sval;
+				pair->s_allocated = rhs->s_allocated;
 				pair->status = 1;
 				break;
 			case AST_FLOAT:
@@ -2508,7 +2523,7 @@ static void interpret_binary_string_expr(Node *r_operand, Node *operator, Stack 
 		case AST_ADD:
 		case AST_EQ:
 			operator->result_type = TYPE_STRING;
-			push(opstack, ast_stringtype("", -1));
+			push(opstack, ast_stringtype("", -1, 0));
 			break;
 		default:
 			c_error("Illegal operation on value with type string.", -1);
