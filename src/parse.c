@@ -2506,6 +2506,10 @@ static void interpret_binary_string_expr(Node *r_operand, Node *operator, Stack 
 	if (r_operand->type != AST_STRING) {
 		ValPropPair *ident_pair = r_operand->lvar_valproppair;
 
+		if (!ident_pair) {
+			c_error("Operands of binary operation must be of the same type.", -1);
+		}
+
 		if (ident_pair->type != TYPE_STRING) {
 			c_error("Operands of binary operation must be of the same type.", -1);
 		}
