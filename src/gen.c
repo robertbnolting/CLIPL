@@ -552,12 +552,12 @@ static void emit_syscall(Node **args, size_t n_args)
 			emit_expr(args[i]);
 			if (args[i]->type == AST_IDENT) {
 				if (args[i]->lvar_valproppair->type == AST_STRING) {
-					emit("mov %s v%d", regs[i-1], vregs_idx-1);
-					vregs_idx++;
+					emit("mov %s v%d", regs[i-1], vregs_idx-2);
+				} else {
+					emit("mov %s v%d", regs[i-1], vregs_idx++);
 				}
 			} else if (args[i]->type == AST_STRING) {
-				emit("mov %s v%d", regs[i-1], vregs_idx-1);
-				vregs_idx++;
+				emit("mov %s v%d", regs[i-1], vregs_idx-2);
 			} else {
 				emit("mov %s v%d", regs[i-1], vregs_idx++);
 			}
@@ -626,9 +626,9 @@ static void emit_store_offset(int offset, int type)
 			emit("mov [rbp-%d] vd%d", offset, vregs_idx++);
 			break;
 		case TYPE_STRING:
-			emit("mov [rbp-%d] v%d", offset-4, vregs_idx-1);
-			emit("mov [rbp-%d] vd%d", offset, vregs_idx);
-			//emit("lea v%d [rbp-%d]", vregs_idx++, offset);
+			emit("mov [rbp-%d] v%d", offset-4, vregs_idx-2);
+			emit("mov vd%d [v%d]", vregs_idx-1, vregs_idx-1);
+			emit("mov [rbp-%d] vd%d", offset, vregs_idx-1);
 			emit("\n");
 			break;
 		default:
@@ -905,7 +905,9 @@ static void emit_literal(Node *expr)
 				emit_noindent("section .text");
 			}
 			emit("mov v%d %s", vregs_idx++, expr->slabel);
-			emit("mov v%d %d", vregs_idx, expr->slen);
+			stack_offset += 4;
+			emit("mov dword [rbp-%d] %d", stack_offset, expr->slen);
+			emit("lea v%d [rbp-%d]", vregs_idx++, stack_offset);
 			break;
 		case AST_ARRAY:
 			break;
@@ -944,7 +946,7 @@ static void emit_load(int offset, char *base, int type)
 	{
 		case TYPE_STRING:
 			emit("mov v%d [%s-%d]", vregs_idx++, base, offset-4);
-			emit("lea v%d [%s-%d]", vregs_idx, base, offset);
+			emit("lea v%d [%s-%d]", vregs_idx++, base, offset);
 			break;
 		case TYPE_ARRAY:
 			break;
@@ -974,7 +976,7 @@ static void emit_declaration(Node *n)
 	switch (n->lvar_valproppair->type)
 	{
 		case TYPE_STRING:
-			stack_offset += 8;
+			stack_offset += 12;
 			n->lvar_valproppair->loff = stack_offset;
 			break;
 		case TYPE_ARRAY:
@@ -1074,13 +1076,13 @@ static size_t emit_string_arith_binop(Node *expr)
 {
 	size_t *string1_pair = emit_string_assign(NULL, expr->left);
 	size_t string1_len = string1_pair[0];
-	int string1 = vregs_idx-1;
-	int string1_end = vregs_idx++;
+	int string1 = vregs_idx-2;
+	int string1_end = vregs_idx-1;
 
 	size_t *string2_pair = emit_string_assign(NULL, expr->right);
 	size_t string2_len = string2_pair[0];
-	int string2 = vregs_idx-1;
-	int string2_end = vregs_idx++;
+	int string2 = vregs_idx-2;
+	int string2_end = vregs_idx-1;
 
 	size_t new_len;
 	if (string1_pair[1] && string2_pair[1]) {
@@ -1140,8 +1142,12 @@ static size_t emit_string_arith_binop(Node *expr)
 	string2_len--;
 
 	emit("mov v%d %s", vregs_idx++, new_string);
-	emit("add dword [v%d] %d", string1_end, string2_len);
-	emit("mov vd%d [v%d]", vregs_idx, string1_end);
+	emit("mov vd%d [v%d]", string2_end, string2_end);
+	emit("add [v%d] v%d", string1_end, string2_end);
+
+	emit("mov v%d v%d", vregs_idx++, string1_end);
+
+	emit("\n");
 
 	return new_len;
 }
@@ -1282,9 +1288,50 @@ static void emit_for(Node *n)
 
 	int *sizes;
 
-	if (for_enum->type == AST_IDENT) {
-		enum_off = for_enum->lvar_valproppair->loff;
-		sizes = for_enum->lvar_valproppair->array_size;
+	if (for_enum->type == AST_IDENT || for_enum->type == AST_STRING) {
+		if (for_enum->type == AST_IDENT) {
+			if (for_enum->lvar_valproppair->type != TYPE_STRING) {
+				enum_off = for_enum->lvar_valproppair->loff;
+				sizes = for_enum->lvar_valproppair->array_size;
+
+				goto cont_nostring;
+			}
+		}
+
+		char *loop_label = makeLabel();
+		int acc = vregs_idx++;
+
+		emit_expr(for_enum);
+		int string = vregs_idx-2;
+		int len = vregs_idx-1;
+
+		emit("mov v%d [v%d]", len, len);
+
+		emit_declaration(for_it);
+
+		emit("mov vd%d 0", acc);
+		emit_noindent("%s:", loop_label);
+
+		emit("mov vb%d [v%d+v%d]", vregs_idx, string, acc);
+
+		stack_offset += 2;
+		emit("mov [rbp-%d] vb%d", stack_offset, vregs_idx);
+		emit("mov byte [rbp-%d] 0", stack_offset-1);
+		emit("lea v%d [rbp-%d]", vregs_idx++, stack_offset);
+		stack_offset += 4;
+		emit("mov dword [rbp-%d] 1", stack_offset);
+		emit("lea v%d [rbp-%d]", vregs_idx++, stack_offset);
+
+		emit_store_offset(for_it->lvar_valproppair->loff, for_it->vtype);
+
+		emit_block(n->for_body, n->n_for_stmts);
+
+		emit("inc vd%d", acc);
+		emit("cmp vd%d vd%d", acc, len);
+		emit("jl %s", loop_label);
+
+		stack_offset = saved_stack;
+		return;
 	} else if (for_enum->type == AST_ARRAY) {
 		sizes = getArraySizes(for_enum, for_enum->array_dims);
 
@@ -1299,40 +1346,8 @@ static void emit_for(Node *n)
 
 		size_t array_len = 0;
 		emit_offset_assign(for_enum->array_dims, sizes, &array_len, &for_enum->array_elems, stack_offset, for_enum);
-	} else {
-		char *loop_label = makeLabel();
-		int acc = vregs_idx++;
-		int len = vregs_idx++;
-
-		emit_expr(for_enum);
-		int string = vregs_idx++;
-
-		emit_declaration(for_it);
-
-		emit("mov vd%d 0", acc);
-		emit("mov vd%d %d", len, for_enum->slen);
-		emit_noindent("%s:", loop_label);
-
-		emit("mov vb%d [v%d+v%d]", vregs_idx, string, acc);
-
-		stack_offset += 2;
-		emit("mov [rbp-%d] vb%d", stack_offset, vregs_idx);
-		emit("mov byte [rbp-%d] 0", stack_offset-1);
-		emit("sub rbp %d", stack_offset);
-		emit("mov v%d rbp", vregs_idx);
-		emit("add rbp %d", stack_offset);
-
-		emit_store_offset(for_it->lvar_valproppair->loff, for_it->vtype);
-
-		emit_block(n->for_body, n->n_for_stmts);
-
-		emit("inc vd%d", acc);
-		emit("cmp vd%d vd%d", acc, len);
-		emit("jl %s", loop_label);
-
-		stack_offset = saved_stack;
-		return;
 	}
+cont_nostring:
 
 	char *loop_label = makeLabel();
 	int acc = vregs_idx++;
