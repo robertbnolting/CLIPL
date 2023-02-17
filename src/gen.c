@@ -33,6 +33,8 @@ static int s_regs_count;
 
 static int stack_offset;
 
+Node **global_functions;
+
 static FILE *outputfp;
 static int entrypoint_defined;
 
@@ -146,10 +148,14 @@ static int is_instruction_mnemonic(char *mnem)
 		return JMP;
 	} else if (MATCHES("goto")) {
 		return GOTO;
+	} else if (MATCHES("call")) {
+		return CALL;
 	} else if (MATCHES("push")) {
 		return PUSH;
 	} else if (MATCHES("pop")) {
 		return POP;
+	} else if (MATCHES("ret")) {
+		return RET;
 	}
 
 	return 0;
@@ -202,6 +208,8 @@ static int is_unary_mnemonic(char *mnem)
 		return JMP;
 	} else if (MATCHES("goto")) {
 		return GOTO;
+	} else if (MATCHES("call")) {
+		return CALL;
 	} else if (MATCHES("push")) {
 		return PUSH;
 	} else if (MATCHES("pop")) {
@@ -471,6 +479,8 @@ static void emitf(char *fmt, ...) {
 
 void gen(Node **funcs, size_t n_funcs)
 {
+	global_functions = funcs;
+
 	entrypoint_defined = 0;
 	s_regs_count = 0;
 
@@ -593,21 +603,46 @@ static void emit_func_prologue(Node *func)
 		emit_noindent("global _start");
 		emit_noindent("_start:");
 	}
+
 	emit_noindent("global %s", func->flabel);
 	emit_noindent("%s:", func->flabel);
 	push("rbp");
 	emit("mov rbp rsp");
+	emit("\n");
 	stack_offset = 0;
 	vregs_idx = MAX_REGISTER_COUNT; // 0 - MAX_REGISTER_COUNT for real regs, maybe additional type REAL_REG to be recognized in lva()
 
+	int end_prologue = ins_array_sz;
+
 	push_func_params(func->fnparams, func->n_params);
 
+	emit("\n");
 	emit_block(func->fnbody, func->n_stmts);
+
+	ins_array = realloc(ins_array, sizeof(MnemNode*) * (++ins_array_sz));
+
+	memmove(&ins_array[end_prologue+1], &ins_array[end_prologue], sizeof(MnemNode*) * (ins_array_sz-end_prologue));
+
+	char *numVarsStr = malloc(10);
+	sprintf(numVarsStr, "%d", stack_offset);
+
+	MnemNode *sub = makeMnemNode("\tsub");
+	sub->left = makeMnemNode("rsp");
+	sub->right = makeMnemNode(numVarsStr);
+
+	ins_array[end_prologue] = sub;
+
+	emit("\n");
+	emit("add rsp %d", stack_offset);
+	emit("pop rbp");
+	emit("\n");
 
 	if (func->is_fn_entrypoint) {
 		emit("mov rax 60");
 		emit("mov rdi 0");
 		emit("syscall");
+	} else {
+		emit("ret");
 	}
 }
 
@@ -1240,6 +1275,8 @@ static void emit_func_call(Node *n)
 
 	if (idx < 0) {
 		emit_syscall(n->callargs, n->n_args);
+	} else {
+		emit("call %s", global_functions[idx]->flabel);
 	}
 }
 
