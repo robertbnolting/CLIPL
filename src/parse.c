@@ -303,6 +303,8 @@ static const char *datatypeToString(int type)
 			return "\x1b[95mbool\x1b[0m";
 		case TYPE_ARRAY:
 			return "\x1b[95marray\x1b[0m";
+		case TYPE_VOID:
+			return "\x1b[95mvoid\x1b[0m";
 		default:
 			return "Unknown";
 	}
@@ -1026,7 +1028,7 @@ static Node *read_fn_def(int isEntry)
 
 		expect(TYPE_SPECIFIER, "-> operator must be followed by valid type specifier.");
 
-		int ret_type = get_type_specifier(curr());
+		int ret_type = get_type_specifier(prev());
 		int array_dims = 0;
 
 		for (;;) {
@@ -2316,18 +2318,6 @@ static void interpret_assignment_expr(Node *expr, Stack *opstack, Stack *valstac
 								c_error(msg, -1);
 							}
 
-							// TODO: delete
-							/*
-							for (int i = 0; i < ident_pair->array_dims; i++) {
-								if (ident_pair->array_size[i] != pair->array_size[i]) {
-									char msg[128];
-									sprintf(msg, "Invalid assignment of array with size %d to array with size %d.",
-										ident_pair->array_size[i], pair->array_size[i]);
-									c_error(msg, -1);
-								}
-							}
-							*/
-
 							pair->status = 1;
 							break;
 					}
@@ -2373,6 +2363,37 @@ static void interpret_assignment_expr(Node *expr, Stack *opstack, Stack *valstac
 				pair->status = 1;
 			}
 			break;
+			case AST_FUNCTION_CALL:
+#define func (global_functions[rhs->global_function_idx])
+				if (pair->type == TYPE_ARRAY) {
+					if (func->ret_array_dims != pair->array_dims) {
+						char msg[128];
+						if (func->ret_array_dims == 0) {
+							sprintf(msg, "Invalid assignment of function %s with non-array return type to array variable.", func->flabel);
+						} else {
+							sprintf(msg, "Invalid assignment of function %s with %d-D array return type to %d-D array.",
+								func->flabel, func->ret_array_dims, pair->array_dims);
+						}
+						c_error(msg, -1);
+					}
+
+					if (func->return_type != pair->array_type) {
+						char msg[128];
+						sprintf(msg, "Invalid assignment of '%s'-array to '%s'-array.",
+							datatypeToString(func->return_type), datatypeToString(pair->array_type));
+						c_error(msg, -1);
+					}
+				} else {
+					if (func->ret_array_dims) {
+						char msg[128];
+						sprintf(msg, "Invalid assignment of function %s with non-array return type to non-array variable.", func->flabel);
+						c_error(msg, -1);
+					}
+					checkDataType(pair, func->return_type);
+				}
+				pair->status = 1;
+				break;
+#undef func
 			case AST_ADD:
 			case AST_SUB:
 			case AST_MUL:
@@ -2920,6 +2941,7 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 			break;
 		case AST_FUNCTION_CALL:
 			interpret_func_call(expr, *opstack, *valstack);
+			push(*opstack, expr);
 			interpret_expr(expr->successor, opstack, valstack);
 			break;
 		case AST_IF_STMT:

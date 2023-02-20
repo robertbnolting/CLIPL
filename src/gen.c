@@ -527,7 +527,11 @@ void gen(Node **funcs, size_t n_funcs)
 
 		outputbuf_sz += strlen(tmpbuf);
 		outputbuf = realloc(outputbuf, outputbuf_sz+1);
-		strcat(outputbuf, &tmpbuf[0]);
+		if (i == 0) {
+			strcpy(outputbuf, &tmpbuf[0]);
+		} else {
+			strcat(outputbuf, &tmpbuf[0]);
+		}
 		outputbuf[outputbuf_sz] = '\0';
 	}
 
@@ -619,9 +623,11 @@ static void emit_func_prologue(Node *func)
 	emit("\n");
 	emit_block(func->fnbody, func->n_stmts);
 
-	ins_array = realloc(ins_array, sizeof(MnemNode*) * (++ins_array_sz));
+	ins_array = realloc(ins_array, sizeof(MnemNode*) * (ins_array_sz+1));
 
 	memmove(&ins_array[end_prologue+1], &ins_array[end_prologue], sizeof(MnemNode*) * (ins_array_sz-end_prologue));
+
+	ins_array_sz++;
 
 	char *numVarsStr = malloc(10);
 	sprintf(numVarsStr, "%d", stack_offset);
