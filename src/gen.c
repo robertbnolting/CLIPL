@@ -481,6 +481,8 @@ void gen(Node **funcs, size_t n_funcs)
 {
 	global_functions = funcs;
 
+	vregs_idx = MAX_REGISTER_COUNT; // 0 - MAX_REGISTER_COUNT for real regs, maybe additional type REAL_REG to be recognized in lva()
+
 	entrypoint_defined = 0;
 	s_regs_count = 0;
 
@@ -492,6 +494,7 @@ void gen(Node **funcs, size_t n_funcs)
 		c_error("No entrypoint was specified. Use keyword 'entry' in front of function to mark it as the entrypoint.", -1);
 	}
 
+	// TODO: lva is global scope, vregs are function local scope
 #if !PSEUDO_ASM_OUT
 	optimize(); 	// TODO: rename
 #endif
@@ -614,7 +617,7 @@ static void emit_func_prologue(Node *func)
 	emit("mov rbp rsp");
 	emit("\n");
 	stack_offset = 0;
-	vregs_idx = MAX_REGISTER_COUNT; // 0 - MAX_REGISTER_COUNT for real regs, maybe additional type REAL_REG to be recognized in lva()
+	//vregs_idx = MAX_REGISTER_COUNT; // 0 - MAX_REGISTER_COUNT for real regs, maybe additional type REAL_REG to be recognized in lva()
 
 	int end_prologue = ins_array_sz;
 
@@ -1068,7 +1071,8 @@ static void emit_int_arith_binop(Node *expr)
 static size_t *emit_string_assign(Node *var, Node *string)
 {
 	if (string->type == AST_STRING || (string->type == AST_IDENT && string->lvar_valproppair->type == AST_STRING)
-	    || string->type == AST_IDX_ARRAY) {
+	    || string->type == AST_IDX_ARRAY 
+	    || (string->type == AST_FUNCTION_CALL && global_functions[string->global_function_idx]->return_type == AST_STRING)) {
 		emit_expr(string);
 		if (var) {
 			emit_store(var);
@@ -1079,6 +1083,7 @@ static size_t *emit_string_assign(Node *var, Node *string)
 				pair[0] = string->slen;
 				pair[1] = string->s_allocated;
 				return pair;
+			} else if (string->type == AST_FUNCTION_CALL) {
 			} else {
 				var->lvar_valproppair->slen = string->lvar_valproppair->slen;
 				var->lvar_valproppair->s_allocated = string->lvar_valproppair->s_allocated;
@@ -1283,6 +1288,20 @@ static void emit_func_call(Node *n)
 		emit_syscall(n->callargs, n->n_args);
 	} else {
 		emit("call %s", global_functions[idx]->flabel);
+
+		switch (global_functions[n->global_function_idx]->return_type)
+		{
+			case TYPE_INT:
+				emit("mov v%d rax", vregs_idx);
+				break;
+			case TYPE_STRING:
+				emit("mov v%d rax", vregs_idx++);
+				emit("mov v%d rbx", vregs_idx++);
+				break;
+			default:
+				break;
+		}
+
 	}
 }
 
@@ -1442,10 +1461,24 @@ cont_nostring:
 #undef for_it
 }
 
-static void emit_ret()
+static void emit_ret(Node *n)
 {
-	emit("leave");
-	emit("ret");
+#define func (global_functions[n->global_function_idx])
+
+	emit_expr(n->retval);
+
+	switch (func->return_type)
+	{
+		case TYPE_INT:
+			emit("mov rax v%d", vregs_idx);
+			break;
+		case TYPE_STRING:
+			emit("mov rax v%d", vregs_idx-2);
+			emit("mov rbx v%d", vregs_idx-1);
+			break;
+	}
+
+#undef func
 }
 
 static void emit_expr(Node *expr)
@@ -1466,8 +1499,7 @@ static void emit_expr(Node *expr)
 			emit_idx_array(expr);
 			break;
 		case AST_RETURN_STMT:
-			emit_expr(expr->retval);
-			emit_ret();
+			emit_ret(expr);
 			break;
 		case AST_DECLARATION:
 			emit_declaration(expr);
