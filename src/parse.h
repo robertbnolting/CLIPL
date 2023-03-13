@@ -166,7 +166,11 @@ typedef struct Node {
 			size_t n_stmts;
 			struct Node **fnparams;
 			struct Node **fnbody;
+			int global_idx;
+			// used in generation
 			int is_fn_entrypoint;
+			int *called_to;
+			size_t n_called_to;
 		};
 		// function call
 		struct {

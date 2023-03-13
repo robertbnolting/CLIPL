@@ -128,6 +128,7 @@ void parser_init()
 	for (int i = 0; i < array_len; i++) {
 		if (node_array[i]->type == AST_FUNCTION_DEF) {
 			global_functions = realloc(global_functions, (global_function_count+1) * sizeof(Node*));
+			node_array[i]->global_idx = global_function_count;
 			global_functions[global_function_count] = node_array[i];
 			global_function_count++;
 		} else {
@@ -883,7 +884,7 @@ static Node *ast_record_def(char *label, size_t n_fields, Node **fields)
  
 static Node *ast_funcdef(char *label, int ret_type, int array_dims, size_t params_n, size_t stmts_n, Node **params, Node **body, int isEntry)
 {
-	return makeNode(&(Node){AST_FUNCTION_DEF, .flabel=label, .return_type=ret_type, .ret_array_dims=array_dims, .n_params=params_n, .n_stmts=stmts_n, .fnparams=params, .fnbody=body, .is_fn_entrypoint=isEntry});
+	return makeNode(&(Node){AST_FUNCTION_DEF, .flabel=label, .return_type=ret_type, .ret_array_dims=array_dims, .n_params=params_n, .n_stmts=stmts_n, .fnparams=params, .fnbody=body, .is_fn_entrypoint=isEntry, .called_to=NULL, .n_called_to=0});
 }
 
 static Node *ast_funccall(char *label, size_t nargs, Node **args)
@@ -1713,7 +1714,7 @@ static Node *read_ident(Token_type *tok, int no_brackets)
 	return ast_identtype(s);
 }
 
-static int find_function(char *name)
+int find_function(char *name)
 {
 	if (!strcmp("syscall", name)) {
 		return -2;
@@ -2461,9 +2462,8 @@ static void interpret_declaration_expr(Node *expr, Stack *opstack, Stack *valsta
 	push(opstack, expr);
 }
 
-static void interpret_binary_int_expr(int l, Node *r_operand, Node *operator, Stack *opstack, Stack *valstack)
+static void interpret_binary_int_expr(Node *r_operand, Node *operator, Stack *opstack, Stack *valstack)
 {
-	int r;
 	if (r_operand->type != AST_INT) {
 		if (r_operand->type == AST_IDENT || r_operand->type == AST_IDX_ARRAY) {
 			ValPropPair *ident_pair = r_operand->lvar_valproppair;
@@ -2476,46 +2476,31 @@ static void interpret_binary_int_expr(int l, Node *r_operand, Node *operator, St
 			} else if (ident_pair->status == 2) {
 				c_warning("Right operand of binary operation may not be initialized.", -1);
 			}
-			r = ident_pair->ival;
+		} else if (r_operand->type == AST_FUNCTION_CALL) {
+			if (global_functions[r_operand->global_function_idx]->return_type != TYPE_INT) {
+				c_error("Operands of binary operation must be of the same type.", -1);
+			}
 		} else {
 			c_error("Invalid combination of operands with left-hand-side type int. Try changing the order of the operation.", -1);
 		}
-	} else {
-		r = r_operand->ival;
 	}
 
 	int op = operator->type;
 	switch (op)
 	{
 		case AST_ADD:
-			push(opstack, ast_inttype(l + r));
-			break;
 		case AST_SUB:
-			push(opstack, ast_inttype(l - r));
-			break;
 		case AST_MUL:
-			push(opstack, ast_inttype(l * r));
-			break;
 		case AST_DIV:
-			push(opstack, ast_inttype(l / r));
+			push(opstack, ast_inttype(1));
 			break;
 		case AST_GT:
-			push(opstack, ast_booltype(l > r));
-			break;
 		case AST_LT:
-			push(opstack, ast_booltype(l < r));
-			break;
 		case AST_EQ:
-			push(opstack, ast_booltype(l == r));
-			break;
 		case AST_NE:
-			push(opstack, ast_booltype(l != r));
-			break;
 		case AST_GE:
-			push(opstack, ast_booltype(l >= r));
-			break;
 		case AST_LE:
-			push(opstack, ast_booltype(l <= r));
+			push(opstack, ast_booltype(1));
 			break;
 	}
 
@@ -2569,7 +2554,7 @@ static void interpret_binary_ident_expr(Node *l_operand, Node *r_operand, Node *
 	switch (l_op_pair->type)
 	{
 		case TYPE_INT:
-			interpret_binary_int_expr(l_op_pair->ival, r_operand, operator, opstack, valstack);
+			interpret_binary_int_expr(r_operand, operator, opstack, valstack);
 			break;
 		case TYPE_STRING:
 			interpret_binary_string_expr(r_operand, operator, opstack, valstack);
@@ -2736,7 +2721,7 @@ static void interpret_binary_idx_expr(Node *l_operand, Node *r_operand, Node *op
 	switch (r_operand->type)
 	{
 		case AST_INT:
-			interpret_binary_int_expr(r_operand->ival, l_operand, operator, opstack, valstack);
+			interpret_binary_int_expr(l_operand, operator, opstack, valstack);
 			break;
 		case AST_ARRAY:
 			interpret_binary_array_expr(l_operand, r_operand, operator, opstack, valstack);
@@ -2756,16 +2741,10 @@ static void interpret_binary_expr(Node *operator, Stack *opstack, Stack *valstac
 	Node *r_operand = (Node *) pop(opstack);
 	Node *l_operand = (Node *) pop(opstack);
 
-	/*
-	if ((r_operand->type != l_operand->type) && !( (r_operand->type == AST_IDENT || r_operand->type == AST_ARRAY || r_operand->type == AST_IDX_ARRAY)
-				|| (l_operand->type == AST_IDENT || l_operand->type == AST_ARRAY || l_operand->type == AST_IDX_ARRAY) )) {
-				c_error("Operands of binary operation must be of the same type.", -1);
-	} */
-
 	switch (l_operand->type)
 	{
 		case AST_INT:
-			interpret_binary_int_expr(l_operand->ival, r_operand, operator, opstack, valstack);
+			interpret_binary_int_expr(r_operand, operator, opstack, valstack);
 			break;
 		case AST_STRING:
 			interpret_binary_string_expr(r_operand, operator, opstack, valstack);
@@ -2989,6 +2968,9 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 			interpret_expr(expr->for_iterator, opstack, valstack);
 			expr->for_iterator->lvar_valproppair->status = 1;
 			interpret_expr(expr->for_loop_successor, opstack, valstack);
+			interpret_expr(expr->successor, opstack, valstack);
+			break;
+		case AST_RETURN_STMT:
 			interpret_expr(expr->successor, opstack, valstack);
 			break;
 	}

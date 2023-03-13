@@ -244,6 +244,7 @@ static int realRegToIdx(char *mnem, char *mode)
 	return -1;
 }
 
+int current_func;
 MnemNode *makeMnemNode(char *mnem)
 {
 	if (mnem[0] == '\0') {
@@ -277,6 +278,7 @@ MnemNode *makeMnemNode(char *mnem)
 	int type = is_instruction_mnemonic(mnem);
 	char mode = 0;
 	int idx = -1;
+	int ret_belongs_to = -1;
 
 	if (!type) {
 		char *mnem_p = mnem;
@@ -315,6 +317,16 @@ MnemNode *makeMnemNode(char *mnem)
 			type = VIRTUAL_REG;
 		} else if (mnem_p[strlen(mnem)-1] == ':') {
 			type = LABEL;
+			char *func_name = malloc(strlen(mnem));
+			strcpy(func_name, mnem_p);
+			func_name[strlen(func_name)-1] = '\0';
+
+			int func_idx = find_function(func_name);
+			if (func_idx >= 0) {
+				current_func = func_idx;
+			}
+
+			free(func_name);
 		} else if (mnem_p[off] >= '0' && mnem_p[off] <= '9') {
 			type = LITERAL;
 		} else if (mnem_p[off] == '\'' || mnem_p[off] == '"') {
@@ -333,6 +345,10 @@ MnemNode *makeMnemNode(char *mnem)
 		}
 	}
 
+	if (type == RET) {
+		ret_belongs_to = current_func;
+	}
+
 	if (type == VIRTUAL_REG) {
 		switch (mnem[1])
 		{
@@ -349,6 +365,7 @@ MnemNode *makeMnemNode(char *mnem)
 		}
 	}
 
+	r->ret_belongs_to = ret_belongs_to;
 	r->idx = idx;
 	r->mode = mode;
 
@@ -1287,9 +1304,13 @@ static void emit_func_call(Node *n)
 	if (idx < 0) {
 		emit_syscall(n->callargs, n->n_args);
 	} else {
-		emit("call %s", global_functions[idx]->flabel);
+#define func (global_functions[idx])
+		func->called_to = realloc(func->called_to, sizeof(int)*(func->n_called_to+1));
+		func->called_to[func->n_called_to++] = ins_array_sz + 2; // +2 to account for function epilogue
 
-		switch (global_functions[n->global_function_idx]->return_type)
+		emit("call %s", func->flabel);
+
+		switch (func->return_type)
 		{
 			case TYPE_INT:
 				emit("mov v%d rax", vregs_idx);
@@ -1303,6 +1324,7 @@ static void emit_func_call(Node *n)
 		}
 
 	}
+#undef func
 }
 
 static void emit_if(Node *n)
@@ -1470,7 +1492,7 @@ static void emit_ret(Node *n)
 	switch (func->return_type)
 	{
 		case TYPE_INT:
-			emit("mov rax v%d", vregs_idx);
+			emit("mov rax v%d", vregs_idx++);
 			break;
 		case TYPE_STRING:
 			emit("mov rax v%d", vregs_idx-2);
@@ -1706,6 +1728,19 @@ static InterferenceNode **lva()
 				if (p == 0) {
 					syscall_list = realloc(syscall_list, sizeof(int) * (syscall_list_sz + 1));
 					syscall_list[syscall_list_sz++] = i;
+				}
+			} else if (n->type == RET) {
+				int func_idx = n->ret_belongs_to;
+				if (func_idx >= 0) {	// is function label
+					int *live_at_call = NULL;
+					size_t live_at_call_sz = 0;
+					for (int j = 0; j < global_functions[func_idx]->n_called_to; j++) {
+						int range_idx = global_functions[func_idx]->called_to[j];
+						printf("Range %d\n", range_idx);
+						live_at_call = live_range[range_idx];
+						live_at_call_sz = live_sz_array[range_idx];
+						live = liverange_union(live_at_call, live, live_at_call_sz, &live_sz);
+					}
 				}
 			}
 

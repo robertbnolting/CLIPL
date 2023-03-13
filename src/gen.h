@@ -53,6 +53,7 @@ typedef struct MnemNode {
 	int n_vregs_used;
 	// only for virtual registers
 	int first_def;
+	int ret_belongs_to;
 	int idx;
 	char mode;
 } MnemNode;
