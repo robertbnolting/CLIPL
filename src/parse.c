@@ -2510,20 +2510,26 @@ static void interpret_binary_int_expr(Node *r_operand, Node *operator, Stack *op
 static void interpret_binary_string_expr(Node *r_operand, Node *operator, Stack *opstack, Stack *valstack)
 {
 	if (r_operand->type != AST_STRING) {
-		ValPropPair *ident_pair = r_operand->lvar_valproppair;
+		if (r_operand->type == AST_IDENT || r_operand->type == AST_IDX_ARRAY) {
+			ValPropPair *ident_pair = r_operand->lvar_valproppair;
 
-		if (!ident_pair) {
-			c_error("Operands of binary operation must be of the same type.", -1);
-		}
+			if (!ident_pair) {
+				c_error("Operands of binary operation must be of the same type.", -1);
+			}
 
-		if (ident_pair->type != TYPE_STRING) {
-			c_error("Operands of binary operation must be of the same type.", -1);
-		}
+			if (ident_pair->type != TYPE_STRING) {
+				c_error("Operands of binary operation must be of the same type.", -1);
+			}
 
-		if (ident_pair->status == 0) {
-			c_error("Right operand of binary operation not initialized.", -1);
-		} else if (ident_pair->status == 2) {
-			c_warning("Right operand of binary operation may not be initialized.", -1);
+			if (ident_pair->status == 0) {
+				c_error("Right operand of binary operation not initialized.", -1);
+			} else if (ident_pair->status == 2) {
+				c_warning("Right operand of binary operation may not be initialized.", -1);
+			}
+		} else if (r_operand->type == AST_FUNCTION_CALL) {
+			if (global_functions[r_operand->global_function_idx]->return_type != TYPE_STRING) {
+				c_error("Operands of binary operation must be of the same type.", -1);
+			}
 		}
 	}
 

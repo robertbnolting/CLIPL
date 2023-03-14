@@ -34,6 +34,7 @@ static int s_regs_count;
 static int stack_offset;
 
 Node **global_functions;
+int current_function;
 
 static FILE *outputfp;
 static int entrypoint_defined;
@@ -504,6 +505,7 @@ void gen(Node **funcs, size_t n_funcs)
 	s_regs_count = 0;
 
 	for (int i = 0; i < n_funcs; i++) {
+		current_function = i;
 		emit_func_prologue(funcs[i]);
 	}
 
@@ -1485,7 +1487,25 @@ cont_nostring:
 
 static void emit_ret(Node *n)
 {
-#define func (global_functions[n->global_function_idx])
+#define func (global_functions[current_function])
+
+	switch (n->retval->type)
+	{
+		case AST_IDENT:
+			if (n->retval->lvar_valproppair->type != func->return_type) {
+				char msg[128];
+				sprintf(&msg[0], "Type of return value does not match return value of function %s.", func->flabel);
+				c_error(msg, -1);
+			}
+			break;
+		default:
+			if (n->retval->type != func->return_type) {
+				char msg[128];
+				sprintf(&msg[0], "Type of return value does not match return value of function %s.", func->flabel);
+				c_error(msg, -1);
+			}
+			break;
+	}
 
 	emit_expr(n->retval);
 
