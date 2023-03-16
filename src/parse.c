@@ -2740,7 +2740,6 @@ static void interpret_binary_idx_expr(Node *l_operand, Node *r_operand, Node *op
 	if (l_operand->lvar_valproppair->array_type != r_operand->lvar_valproppair->array_type) {
 		c_error("Operands of binary operation must be of the same type.", -1);
 	} */
-
 	//operator->result_type = l_operand->lvar_valproppair->type;
 	//push(opstack, l_operand);
 }
@@ -2765,6 +2764,13 @@ static void interpret_binary_expr(Node *operator, Stack *opstack, Stack *valstac
 			break;
 		case AST_IDX_ARRAY:
 			interpret_binary_idx_expr(l_operand, r_operand, operator, opstack, valstack);
+			break;
+		case AST_FUNCTION_CALL:
+			push(opstack, global_functions[l_operand->global_function_idx]->return_stmt->retval);
+			push(opstack, r_operand);
+
+			interpret_binary_expr(operator, opstack, valstack);
+
 			break;
 	}
 }
