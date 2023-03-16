@@ -171,6 +171,7 @@ typedef struct Node {
 			int is_fn_entrypoint;
 			int *called_to;
 			size_t n_called_to;
+			struct Node *return_stmt;
 		};
 		// function call
 		struct {

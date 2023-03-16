@@ -34,7 +34,6 @@ static int s_regs_count;
 static int stack_offset;
 
 Node **global_functions;
-int current_function;
 
 static FILE *outputfp;
 static int entrypoint_defined;
@@ -94,6 +93,24 @@ static void clear(char *a)
 	while (*a != 0) {
 		*a = 0;
 		a++;
+	}
+}
+
+static void getStringLens(Node *n, size_t *pair)
+{
+	switch (n->type)
+	{
+		case AST_FUNCTION_CALL:
+	 		getStringLens(global_functions[n->global_function_idx]->return_stmt->retval, pair);
+			break;
+		case AST_IDENT:
+			pair[0] = n->lvar_valproppair->slen;
+			pair[1] = n->lvar_valproppair->s_allocated;
+			break;
+		case AST_STRING:
+			pair[0] = n->slen;
+			pair[1] = n->s_allocated;
+			break;
 	}
 }
 
@@ -505,7 +522,6 @@ void gen(Node **funcs, size_t n_funcs)
 	s_regs_count = 0;
 
 	for (int i = 0; i < n_funcs; i++) {
-		current_function = i;
 		emit_func_prologue(funcs[i]);
 	}
 
@@ -1093,37 +1109,18 @@ static size_t *emit_string_assign(Node *var, Node *string)
 	    || string->type == AST_IDX_ARRAY 
 	    || (string->type == AST_FUNCTION_CALL && global_functions[string->global_function_idx]->return_type == AST_STRING)) {
 		emit_expr(string);
+
+		size_t *pair = malloc(sizeof(size_t) * 2);
+		getStringLens(string, pair);
+
 		if (var) {
 			emit_store(var);
-			if (string->type == AST_STRING) {
-				var->lvar_valproppair->slen = string->slen;
-				var->lvar_valproppair->s_allocated = string->s_allocated;
-				size_t *pair = malloc(sizeof(size_t) * 2);
-				pair[0] = string->slen;
-				pair[1] = string->s_allocated;
-				return pair;
-			} else if (string->type == AST_FUNCTION_CALL) {
-			} else {
-				var->lvar_valproppair->slen = string->lvar_valproppair->slen;
-				var->lvar_valproppair->s_allocated = string->lvar_valproppair->s_allocated;
-				size_t *pair = malloc(sizeof(size_t) * 2);
-				pair[0] = string->lvar_valproppair->slen;
-				pair[1] = string->lvar_valproppair->s_allocated;
-				return pair;
-			}
-		} else {
-			if (string->type == AST_STRING) {
-				size_t *pair = malloc(sizeof(size_t) * 2);
-				pair[0] = string->slen;
-				pair[1] = string->s_allocated;
-				return pair;
-			} else {
-				size_t *pair = malloc(sizeof(size_t) * 2);
-				pair[0] = string->lvar_valproppair->slen;
-				pair[1] = string->lvar_valproppair->s_allocated;
-				return pair;
-			}
+
+			var->lvar_valproppair->slen = pair[0];
+			var->lvar_valproppair->s_allocated = pair[1];
 		}
+
+		return pair;
 	} else {
 		size_t len = emit_string_arith_binop(string);
 		if (var) {
@@ -1487,29 +1484,11 @@ cont_nostring:
 
 static void emit_ret(Node *n)
 {
-#define func (global_functions[current_function])
-
-	switch (n->retval->type)
-	{
-		case AST_IDENT:
-			if (n->retval->lvar_valproppair->type != func->return_type) {
-				char msg[128];
-				sprintf(&msg[0], "Type of return value does not match return value of function %s.", func->flabel);
-				c_error(msg, -1);
-			}
-			break;
-		default:
-			if (n->retval->type != func->return_type) {
-				char msg[128];
-				sprintf(&msg[0], "Type of return value does not match return value of function %s.", func->flabel);
-				c_error(msg, -1);
-			}
-			break;
-	}
-
 	emit_expr(n->retval);
 
-	switch (func->return_type)
+	int type = (n->retval->type == AST_IDENT) ? n->retval->lvar_valproppair->type : n->retval->type;
+
+	switch (type)
 	{
 		case TYPE_INT:
 			emit("mov rax v%d", vregs_idx++);
@@ -1519,8 +1498,6 @@ static void emit_ret(Node *n)
 			emit("mov rbx v%d", vregs_idx-1);
 			break;
 	}
-
-#undef func
 }
 
 static void emit_expr(Node *expr)
@@ -2038,7 +2015,7 @@ static char *substitute_vreg(char *str, char *reg)
 								break;
 							}
 							int offset = strlen(reg) - (str_p - start);
-							char *ret = malloc(strlen(str) + offset);
+							char *ret = calloc(strlen(str) + offset, 1);
 							strncpy(ret, str, start-str);
 							strcat(ret, reg);
 							strncat(ret, str_p, str + len - str_p);

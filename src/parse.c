@@ -311,16 +311,16 @@ static const char *datatypeToString(int type)
 	}
 }
 
-static int astToDatatype(int astType)
+static int getPrimitiveType(Node *n)
 {
-	switch (astType)
+	switch (n->type)
 	{
-		case AST_INT: return TYPE_INT;
-		case AST_FLOAT: return TYPE_FLOAT;
-		case AST_STRING: return TYPE_STRING;
-		case AST_BOOL: return TYPE_BOOL;
-		case AST_ARRAY: return TYPE_ARRAY;
-		default: return -1;
+		case AST_FUNCTION_CALL:
+			return getPrimitiveType(global_functions[n->global_function_idx]->return_stmt->retval);
+		case AST_IDENT:
+			return n->lvar_valproppair->type;
+		default:
+			return n->type;
 	}
 }
 
@@ -1787,6 +1787,8 @@ static void thread_expression(Node *expr)
 	switch (expr->type)
 	{
 		case AST_FUNCTION_DEF:
+			last_node->successor = expr;
+			last_node = expr;
 			thread_block(expr->fnbody, expr->n_stmts);
 			break;
 		case AST_IDENT:
@@ -2785,6 +2787,7 @@ static void interpret_if_stmt(Node *stmt, Stack *opstack, Stack *valstack)
 	}
 }
 
+Node *current_function;
 static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 {
 	if (expr == NULL || expr->type == CFG_JOIN_NODE) {
@@ -2924,6 +2927,10 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 			interpret_assignment_expr(expr, *opstack, *valstack);
 			interpret_expr(expr->successor, opstack, valstack);
 			break;
+		case AST_FUNCTION_DEF:
+			current_function = expr;
+			interpret_expr(expr->successor, opstack, valstack);
+			break;
 		case AST_FUNCTION_CALL:
 			interpret_func_call(expr, *opstack, *valstack);
 			push(*opstack, expr);
@@ -2977,6 +2984,16 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 			interpret_expr(expr->successor, opstack, valstack);
 			break;
 		case AST_RETURN_STMT:
+			interpret_expr(expr->retval, opstack, valstack);
+
+			if (getPrimitiveType(expr->retval) != current_function->return_type) {
+				char msg[128];
+				sprintf(&msg[0], "Type of return value does not match return value of function %s.", current_function->flabel);
+				c_error(msg, -1);
+			}
+
+			current_function->return_stmt = expr;
+
 			interpret_expr(expr->successor, opstack, valstack);
 			break;
 	}
