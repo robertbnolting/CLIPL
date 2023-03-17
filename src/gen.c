@@ -7,6 +7,8 @@
 #include "gen.h"
 #include "error.h"
 
+//TODO: passing string lens by reference after calling functions does not work
+
 #define PSEUDO_ASM_OUT 0
 
 #define MAX_REGISTER_COUNT 14
@@ -529,7 +531,6 @@ void gen(Node **funcs, size_t n_funcs)
 		c_error("No entrypoint was specified. Use keyword 'entry' in front of function to mark it as the entrypoint.", -1);
 	}
 
-	// TODO: lva is global scope, vregs are function local scope
 #if !PSEUDO_ASM_OUT
 	optimize(); 	// TODO: rename
 #endif
@@ -1315,8 +1316,10 @@ static void emit_func_call(Node *n)
 				emit("mov v%d rax", vregs_idx);
 				break;
 			case TYPE_STRING:
+				stack_offset += 8;
 				emit("mov v%d rax", vregs_idx++);
-				emit("mov v%d rbx", vregs_idx++);
+				emit("mov [rbp-%d] rbx", stack_offset, vregs_idx);
+				emit("lea v%d [rbp-%d]", vregs_idx++, stack_offset);
 				break;
 			default:
 				break;
@@ -1495,7 +1498,7 @@ static void emit_ret(Node *n)
 			break;
 		case TYPE_STRING:
 			emit("mov rax v%d", vregs_idx-2);
-			emit("mov rbx v%d", vregs_idx-1);
+			emit("mov ebx [v%d]", vregs_idx-1);
 			break;
 	}
 }
