@@ -169,6 +169,7 @@ typedef struct Node {
 			int global_idx;
 			// used in generation
 			int is_fn_entrypoint;
+			int is_called;
 			int *called_to;
 			size_t n_called_to;
 			struct Node *return_stmt;

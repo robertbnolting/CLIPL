@@ -884,7 +884,7 @@ static Node *ast_record_def(char *label, size_t n_fields, Node **fields)
  
 static Node *ast_funcdef(char *label, int ret_type, int array_dims, size_t params_n, size_t stmts_n, Node **params, Node **body, int isEntry)
 {
-	return makeNode(&(Node){AST_FUNCTION_DEF, .flabel=label, .return_type=ret_type, .ret_array_dims=array_dims, .n_params=params_n, .n_stmts=stmts_n, .fnparams=params, .fnbody=body, .is_fn_entrypoint=isEntry, .called_to=NULL, .n_called_to=0});
+	return makeNode(&(Node){AST_FUNCTION_DEF, .flabel=label, .return_type=ret_type, .ret_array_dims=array_dims, .n_params=params_n, .n_stmts=stmts_n, .fnparams=params, .fnbody=body, .is_fn_entrypoint=isEntry, .is_called=0, .called_to=NULL, .n_called_to=0});
 }
 
 static Node *ast_funccall(char *label, size_t nargs, Node **args)
@@ -1782,11 +1782,13 @@ static void thread_block(Node **block, size_t block_size)
 
 static void thread_expression(Node *expr)
 {
+	static int current_function_idx;
 	Node *aux;
 
 	switch (expr->type)
 	{
 		case AST_FUNCTION_DEF:
+			current_function_idx = find_function(expr->flabel);
 			last_node->successor = expr;
 			last_node = expr;
 			thread_block(expr->fnbody, expr->n_stmts);
@@ -1859,13 +1861,16 @@ static void thread_expression(Node *expr)
 		case AST_FUNCTION_CALL:
 		{
 			int idx = find_function(expr->call_label);
-			if (idx == -1) {
+			if (idx == -1 || idx > current_function_idx) {
 				char *msg = malloc(128);
 				sprintf(msg, "No function with name '%s' was found.", expr->call_label);
 				c_error(msg, -1);
 				free(msg);
 			}
 			expr->global_function_idx = idx;
+			if (idx >= 0) {
+				global_functions[idx]->is_called = 1;
+			}
 
 			thread_block(expr->callargs, expr->n_args);
 

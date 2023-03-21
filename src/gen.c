@@ -7,8 +7,6 @@
 #include "gen.h"
 #include "error.h"
 
-//TODO: passing string lens by reference after calling functions does not work
-
 #define PSEUDO_ASM_OUT 0
 
 #define MAX_REGISTER_COUNT 14
@@ -551,6 +549,7 @@ void gen(Node **funcs, size_t n_funcs)
 					strcat(tmpbuf, ins_array[i]->right_spec->mnem);
 					strcat(tmpbuf, " ");
 				}
+
 				strcat(tmpbuf, ins_array[i]->right->mnem);
 			}
 			strcat(tmpbuf, "\n");
@@ -640,11 +639,15 @@ static void push_func_params(Node **params, size_t nparams)
 
 static void emit_func_prologue(Node *func)
 {
-	emit_noindent("section .text");
 	if (func->is_fn_entrypoint) {
 		entrypoint_defined = 1;
+		emit_noindent("section .text");
 		emit_noindent("global _start");
 		emit_noindent("_start:");
+	} else if (!func->is_called) {
+		return;
+	} else {
+		emit_noindent("section .text");
 	}
 
 	emit_noindent("global %s", func->flabel);
@@ -653,7 +656,6 @@ static void emit_func_prologue(Node *func)
 	emit("mov rbp rsp");
 	emit("\n");
 	stack_offset = 0;
-	//vregs_idx = MAX_REGISTER_COUNT; // 0 - MAX_REGISTER_COUNT for real regs, maybe additional type REAL_REG to be recognized in lva()
 
 	int end_prologue = ins_array_sz;
 
@@ -1645,7 +1647,7 @@ static InterferenceNode **lva()
 					int saved = live_sz;
 					for (int i = 0; i < n->right->n_vregs_used; i++) {
 						live = addToLiveRange(n->right->vregs_used[i]->idx, live, &live_sz);
-						if (saved != live_sz) {
+						if (saved != live_sz && !used_vregs[n->right->vregs_used[i]->idx]) {
 							used_vregs[n->right->vregs_used[i]->idx] = 1;
 							used_vregs_n++;
 						}
@@ -1675,7 +1677,7 @@ static InterferenceNode **lva()
 						int saved = live_sz;
 						for (int i = 0; i < n->right->n_vregs_used; i++) {
 							live = addToLiveRange(n->right->vregs_used[i]->idx, live, &live_sz);
-							if (saved != live_sz) {
+							if (saved != live_sz && !used_vregs[n->right->vregs_used[i]->idx]) {
 								used_vregs[n->right->vregs_used[i]->idx] = 1;
 								used_vregs_n++;
 							}
@@ -1690,7 +1692,7 @@ static InterferenceNode **lva()
 					int saved = live_sz;
 					for (int i = 0; i < n->left->n_vregs_used; i++) {
 						live = addToLiveRange(n->left->vregs_used[i]->idx, live, &live_sz);
-						if (saved != live_sz) {
+						if (saved != live_sz && !used_vregs[n->left->vregs_used[i]->idx]) {
 							used_vregs[n->left->vregs_used[i]->idx] = 1;
 							used_vregs_n++;
 						}
@@ -1736,7 +1738,6 @@ static InterferenceNode **lva()
 					size_t live_at_call_sz = 0;
 					for (int j = 0; j < global_functions[func_idx]->n_called_to; j++) {
 						int range_idx = global_functions[func_idx]->called_to[j];
-						printf("Range %d\n", range_idx);
 						live_at_call = live_range[range_idx];
 						live_at_call_sz = live_sz_array[range_idx];
 						live = liverange_union(live_at_call, live, live_at_call_sz, &live_sz);
@@ -1800,7 +1801,7 @@ static InterferenceNode **lva()
 			}
 		}
 	}
-	
+
 	// create InterferenceNode for every live variable
 	for (int i = 0; i < ins_array_sz; i++) {
 		int *live = live_range[i];
