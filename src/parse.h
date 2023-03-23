@@ -209,7 +209,10 @@ typedef struct Node {
 			struct Node *for_loop_successor;
 		};
 		// return statement
-		struct Node *retval;
+		struct {
+			struct Node *retval;
+			int rettype;
+		};
 	};
 	ValPropPair *lvar_valproppair;
 } Node;

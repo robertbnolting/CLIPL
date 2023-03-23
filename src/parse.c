@@ -1879,9 +1879,6 @@ static void thread_expression(Node *expr)
 		}
 			break;
 		case AST_RETURN_STMT:
-			last_node->successor = expr;
-			last_node = expr;
-
 			if (expr->retval == NULL) {
 				aux = cfg_aux_node();
 				last_node->successor = aux;
@@ -1889,6 +1886,10 @@ static void thread_expression(Node *expr)
 			} else {
 				thread_expression(expr->retval);
 			}
+
+			last_node->successor = expr;
+			last_node = expr;
+
 			break;
 		case AST_WHILE_STMT:
 			thread_expression(expr->while_cond);
@@ -2749,7 +2750,8 @@ static void interpret_binary_idx_expr(Node *l_operand, Node *r_operand, Node *op
 	//push(opstack, l_operand);
 }
 
-static void interpret_binary_expr(Node *operator, Stack *opstack, Stack *valstack) {
+static void interpret_binary_expr(Node *operator, Stack *opstack, Stack *valstack)
+{
 	Node *r_operand = (Node *) pop(opstack);
 	Node *l_operand = (Node *) pop(opstack);
 
@@ -2786,6 +2788,7 @@ static void interpret_func_def(Node *n, Stack *opstack, Stack *valstack)
 		Node *param = n->fnparams[i];
 
 		interpret_declaration_expr(param, opstack, valstack);
+		((ValPropPair*) *valstack->top)->status = 1;
 	}
 }
 
@@ -3022,9 +3025,12 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 			interpret_expr(expr->successor, opstack, valstack);
 			break;
 		case AST_RETURN_STMT:
-			interpret_expr(expr->retval, opstack, valstack);
+			//interpret_expr(expr->retval, opstack, valstack);
 
-			if (getPrimitiveType(expr->retval) != current_function->return_type) {
+			Node *retval = pop(*opstack);
+			expr->rettype = retval->type;
+			//if (getPrimitiveType(expr->retval) != current_function->return_type) {
+			if (expr->rettype != current_function->return_type) {
 				char msg[128];
 				sprintf(&msg[0], "Type of return value does not match return value of function %s.", current_function->flabel);
 				c_error(msg, -1);

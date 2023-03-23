@@ -1091,17 +1091,31 @@ static void emit_declaration(Node *n)
 static void emit_int_arith_binop(Node *expr)
 {
 	char *op = NULL;
+	int saved_idx;
 	switch (expr->type)
 	{
-		case AST_ADD: op = "add"; break;
-		case AST_SUB: op = "sub"; break;
+		case AST_ADD:
+			op = "add";
+
+			emit_expr(expr->left);
+			saved_idx = vregs_idx;
+			vregs_idx++;
+			vregs_count++;
+			emit_expr(expr->right);
+
+			break;
+		case AST_SUB:
+			op = "sub";
+
+			emit_expr(expr->right);
+			saved_idx = vregs_idx;
+			vregs_idx++;
+			vregs_count++;
+			emit_expr(expr->left);
+
+			break;
 	}
 
-	emit_expr(expr->left);
-	int saved_idx = vregs_idx;
-	vregs_idx++;
-	vregs_count++;
-	emit_expr(expr->right);
 
 	emit("%s vd%d vd%d", op, vregs_idx, saved_idx);
 }
@@ -1493,13 +1507,10 @@ cont_nostring:
 #undef for_it
 }
 
-static void emit_ret(Node *n)
-{
+static void emit_ret(Node *n) {
 	emit_expr(n->retval);
 
-	int type = (n->retval->type == AST_IDENT) ? n->retval->lvar_valproppair->type : n->retval->type;
-
-	switch (type)
+	switch (n->rettype)
 	{
 		case TYPE_INT:
 			emit("mov rax v%d", vregs_idx++);
@@ -2081,7 +2092,7 @@ static void assign_registers(InterferenceNode **g)
 }
 
 
-// Modified insertion sort from https://github.com/geohot/mergesorts/blob/master/mergesort.c
+// Modified mergesort from https://github.com/geohot/mergesorts/blob/master/mergesort.c
 static void sortByColor(InterferenceNode **arr, size_t len)
 {
 	if (len == 1) { return; }
