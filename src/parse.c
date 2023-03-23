@@ -1782,13 +1782,11 @@ static void thread_block(Node **block, size_t block_size)
 
 static void thread_expression(Node *expr)
 {
-	static int current_function_idx;
 	Node *aux;
 
 	switch (expr->type)
 	{
 		case AST_FUNCTION_DEF:
-			current_function_idx = find_function(expr->flabel);
 			last_node->successor = expr;
 			last_node = expr;
 			thread_block(expr->fnbody, expr->n_stmts);
@@ -1860,18 +1858,6 @@ static void thread_expression(Node *expr)
 			break;
 		case AST_FUNCTION_CALL:
 		{
-			int idx = find_function(expr->call_label);
-			if (idx == -1 || idx > current_function_idx) {
-				char *msg = malloc(128);
-				sprintf(msg, "No function with name '%s' was found.", expr->call_label);
-				c_error(msg, -1);
-				free(msg);
-			}
-			expr->global_function_idx = idx;
-			if (idx >= 0) {
-				global_functions[idx]->is_called = 1;
-			}
-
 			//thread_block(expr->callargs, expr->n_args);
 
 			last_node->successor = expr;
@@ -2973,10 +2959,25 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 			interpret_expr(expr->successor, opstack, valstack);
 			break;
 		case AST_FUNCTION_CALL:
+		{
+			int idx = find_function(expr->call_label);
+			if (idx == -1 || idx > current_function->global_idx) {
+				char *msg = malloc(128);
+				sprintf(msg, "No function with name '%s' was found.", expr->call_label);
+				c_error(msg, -1);
+				free(msg);
+			}
+
+			expr->global_function_idx = idx;
+			if (idx >= 0) {
+				global_functions[idx]->is_called = 1;
+			}
+
 			interpret_func_call(expr, opstack, valstack);
 			push(*opstack, expr);
 			interpret_expr(expr->successor, opstack, valstack);
 			break;
+		}
 		case AST_IF_STMT:
 		{
 			Node *end_if;

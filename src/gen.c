@@ -1330,6 +1330,8 @@ static void emit_func_call(Node *n)
 
 		emit("call fn_%s", func->flabel);
 
+		emit("add rsp %d", func->n_params*8);	// clean up the stack
+
 		switch (func->return_type)
 		{
 			case TYPE_INT:
