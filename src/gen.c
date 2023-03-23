@@ -23,9 +23,6 @@ static char *W_REGS[] = {"ax", "bx", "cx", "dx", "si", "di",
 static char *B_REGS[] = {"al", "bl", "cl", "dl", "sil", "dil",
 		       	 "r8b", "r9b", "r10b", "r11b", "r12b", "r13b", "r14b", "r15b"};
 
-static char *P_REGS[] = {"rdi", "rsi", "rdx", "rcx"};
-static char *S_REGS[] = {"r8", "r9", "r10", "r11", "r12", "r13"};
-
 static int vregs_idx;
 static int vregs_count;
 
@@ -337,6 +334,7 @@ MnemNode *makeMnemNode(char *mnem)
 			type = LABEL;
 			char *func_name = malloc(strlen(mnem));
 			strcpy(func_name, mnem_p);
+
 			func_name[strlen(func_name)-1] = '\0';
 
 			int func_idx = find_function(func_name);
@@ -633,8 +631,8 @@ static void emit_func_prologue(Node *func)
 		emit_noindent("section .text");
 	}
 
-	emit_noindent("global %s", func->flabel);
-	emit_noindent("%s:", func->flabel);
+	emit_noindent("global fn_%s", func->flabel);
+	emit_noindent("fn_%s:", func->flabel);
 	push("rbp");
 	emit("mov rbp rsp");
 	emit("\n");
@@ -1330,7 +1328,7 @@ static void emit_func_call(Node *n)
 			emit("push v%d", vregs_idx++);
 		}
 
-		emit("call %s", func->flabel);
+		emit("call fn_%s", func->flabel);
 
 		switch (func->return_type)
 		{
@@ -2059,7 +2057,7 @@ static void assign_registers(InterferenceNode **g)
 {
 	for (int i = 0; i < ins_array_sz; i++) {
 		MnemNode *n = ins_array[i];
-		if (is_instruction_mnemonic(n->mnem)) {
+		if (MOV <= n->type && RET >= n->type) {
 			if (n->left->type == VIRTUAL_REG) {
 				char *reg = assign_color(n->left->mnem, g);
 				if (reg) {

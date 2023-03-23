@@ -3025,11 +3025,14 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 			interpret_expr(expr->successor, opstack, valstack);
 			break;
 		case AST_RETURN_STMT:
-			//interpret_expr(expr->retval, opstack, valstack);
-
+		{
 			Node *retval = pop(*opstack);
-			expr->rettype = retval->type;
-			//if (getPrimitiveType(expr->retval) != current_function->return_type) {
+
+			if (retval->type == AST_IDENT) {
+				expr->rettype = retval->lvar_valproppair->type;
+			} else {
+				expr->rettype = retval->type;
+			}
 			if (expr->rettype != current_function->return_type) {
 				char msg[128];
 				sprintf(&msg[0], "Type of return value does not match return value of function %s.", current_function->flabel);
@@ -3040,5 +3043,6 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 
 			interpret_expr(expr->successor, opstack, valstack);
 			break;
+		}
 	}
 }
