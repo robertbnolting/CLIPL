@@ -1872,7 +1872,7 @@ static void thread_expression(Node *expr)
 				global_functions[idx]->is_called = 1;
 			}
 
-			thread_block(expr->callargs, expr->n_args);
+			//thread_block(expr->callargs, expr->n_args);
 
 			last_node->successor = expr;
 			last_node = expr;
@@ -2780,12 +2780,38 @@ static void interpret_binary_expr(Node *operator, Stack *opstack, Stack *valstac
 	}
 }
 
-static void interpret_func_call(Node *n, Stack *opstack, Stack *valstack)
+static void interpret_func_def(Node *n, Stack *opstack, Stack *valstack)
+{
+	for (int i = 0; i < n->n_params; i++) {
+		Node *param = n->fnparams[i];
+
+		interpret_declaration_expr(param, opstack, valstack);
+	}
+}
+
+static void interpret_func_call(Node *n, Stack **opstack, Stack **valstack)
 {
 	for (int i = 0; i < n->n_args; i++) {
-		Node *arg = (Node *) pop(opstack);
-
-		// TODO: Check call args
+		switch (n->callargs[i]->type)
+		{
+			case AST_ASSIGN:
+			case AST_ADD_ASSIGN:
+			case AST_SUB_ASSIGN:
+			case AST_MUL_ASSIGN:
+			case AST_DIV_ASSIGN:
+			case AST_DECLARATION:
+			case AST_RECORD_DEF:
+			case AST_FUNCTION_DEF:
+			case AST_IF_STMT:
+			case AST_WHILE_STMT:
+			case AST_RETURN_STMT:
+				c_error("Invalid function argument.", -1);
+				return;
+			default:
+				interpret_expr(n->callargs[i], opstack, valstack);
+				pop(*opstack);
+				break;
+		}
 	}
 }
 
@@ -2940,10 +2966,11 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 			break;
 		case AST_FUNCTION_DEF:
 			current_function = expr;
+			interpret_func_def(expr, *opstack, *valstack);
 			interpret_expr(expr->successor, opstack, valstack);
 			break;
 		case AST_FUNCTION_CALL:
-			interpret_func_call(expr, *opstack, *valstack);
+			interpret_func_call(expr, opstack, valstack);
 			push(*opstack, expr);
 			interpret_expr(expr->successor, opstack, valstack);
 			break;

@@ -620,23 +620,6 @@ static void emit_syscall(Node **args, size_t n_args)
 	emit("\n");
 }
 
-static void push_func_params(Node **params, size_t nparams)
-{
-	int ireg = 0;
-	for (int i = 0; i < nparams; i++) {
-		Node *n = params[i];
-		// int, string, bool, array
-		if (n->vtype == 1 || (n->vtype <= 5 && n->vtype >= 3)) {
-			// TODO: what if regs are full
-			push(P_REGS[ireg++]);
-			stack_offset += 8; 	// adjust depending on type
-		} else {
-			printf("Not implemented.\n");
-		}
-		n->lvar_valproppair->loff = stack_offset;
-	}
-}
-
 static void emit_func_prologue(Node *func)
 {
 	if (func->is_fn_entrypoint) {
@@ -655,11 +638,19 @@ static void emit_func_prologue(Node *func)
 	push("rbp");
 	emit("mov rbp rsp");
 	emit("\n");
-	stack_offset = 0;
 
 	int end_prologue = ins_array_sz;
 
-	push_func_params(func->fnparams, func->n_params);
+	// TODO: adjust for different parameter data types
+	stack_offset = -((func->n_params+1) * 8);	// +1 to account for pushed return address
+
+	for (int i = 0; i < func->n_params; i++) {
+		//emit_declaration(func->fnparams[i]);
+		func->fnparams[i]->lvar_valproppair->loff = stack_offset;
+		stack_offset += 8;
+	}
+
+	stack_offset = 0;
 
 	emit("\n");
 	emit_block(func->fnbody, func->n_stmts);
@@ -1027,14 +1018,23 @@ static void emit_load(int offset, char *base, int type)
 	switch (type)
 	{
 		case TYPE_STRING:
-			emit("mov v%d [%s-%d]", vregs_idx++, base, offset-4);
-			emit("lea v%d [%s-%d]", vregs_idx++, base, offset);
+			if (offset < 0) {
+				emit("mov v%d [%s+%d]", vregs_idx++, base, -(offset-4));
+				emit("lea v%d [%s+%d]", vregs_idx++, base, -offset);
+			} else {
+				emit("mov v%d [%s-%d]", vregs_idx++, base, offset-4);
+				emit("lea v%d [%s-%d]", vregs_idx++, base, offset);
+			}
 			break;
 		case TYPE_ARRAY:
 			break;
 		case TYPE_INT:
 		default:
-			emit("mov vd%d [%s-%d]", vregs_idx, base, offset);
+			if (offset < 0) {
+				emit("mov v%d [%s+%d]", vregs_idx, base, -offset);
+			} else {
+				emit("mov vd%d [%s-%d]", vregs_idx, base, offset);
+			}
 			break;
 	}
 }
@@ -1309,6 +1309,12 @@ static void emit_func_call(Node *n)
 #define func (global_functions[idx])
 		func->called_to = realloc(func->called_to, sizeof(int)*(func->n_called_to+1));
 		func->called_to[func->n_called_to++] = ins_array_sz + 2; // +2 to account for function epilogue
+
+		for (int i = 0; i < n->n_args; i++) {
+			// TODO: handle AST-types
+			emit_expr(n->callargs[i]);
+			emit("push v%d", vregs_idx++);
+		}
 
 		emit("call %s", func->flabel);
 
