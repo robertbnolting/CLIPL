@@ -3029,11 +3029,19 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 		{
 			Node *retval = pop(*opstack);
 
-			if (retval->type == AST_IDENT) {
-				expr->rettype = retval->lvar_valproppair->type;
-			} else {
-				expr->rettype = retval->type;
+			switch (retval->type)
+			{
+				case AST_IDENT:
+					expr->rettype = retval->lvar_valproppair->type;
+					break;
+				case AST_FUNCTION_CALL:
+					expr->rettype = global_functions[retval->global_function_idx]->return_type;
+					break;
+				default:
+					expr->rettype = retval->type;
+					break;
 			}
+
 			if (expr->rettype != current_function->return_type) {
 				char msg[128];
 				sprintf(&msg[0], "Type of return value does not match return value of function %s.", current_function->flabel);

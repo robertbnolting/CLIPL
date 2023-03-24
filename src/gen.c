@@ -337,7 +337,7 @@ MnemNode *makeMnemNode(char *mnem)
 
 			func_name[strlen(func_name)-1] = '\0';
 
-			int func_idx = find_function(func_name);
+			int func_idx = find_function(&func_name[3]);
 			if (func_idx >= 0) {
 				current_func = func_idx;
 			}
@@ -1748,16 +1748,16 @@ static InterferenceNode **lva()
 					syscall_list = realloc(syscall_list, sizeof(int) * (syscall_list_sz + 1));
 					syscall_list[syscall_list_sz++] = i;
 				}
-			} else if (n->type == RET) {
+			} else if (n->type == RET && p == 1) {
 				int func_idx = n->ret_belongs_to;
 				if (func_idx >= 0) {	// is function label
 					int *live_at_call = NULL;
 					size_t live_at_call_sz = 0;
 					for (int j = 0; j < global_functions[func_idx]->n_called_to; j++) {
 						int range_idx = global_functions[func_idx]->called_to[j];
-						live_at_call = live_range[range_idx];
-						live_at_call_sz = live_sz_array[range_idx];
-						live = liverange_union(live_at_call, live, live_at_call_sz, &live_sz);
+							live_at_call = live_range[range_idx];
+							live_at_call_sz = live_sz_array[range_idx];
+							live = liverange_union(live_at_call, live, live_at_call_sz, &live_sz);
 					}
 				}
 			}
