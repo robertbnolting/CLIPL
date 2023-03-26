@@ -1858,7 +1858,7 @@ static void thread_expression(Node *expr)
 			break;
 		case AST_FUNCTION_CALL:
 		{
-			//thread_block(expr->callargs, expr->n_args);
+			thread_block(expr->callargs, expr->n_args);
 
 			last_node->successor = expr;
 			last_node = expr;
@@ -2780,7 +2780,9 @@ static void interpret_func_def(Node *n, Stack *opstack, Stack *valstack)
 
 static void interpret_func_call(Node *n, Stack **opstack, Stack **valstack)
 {
+	Node *arg;
 	for (int i = 0; i < n->n_args; i++) {
+		arg = pop(*opstack);
 		switch (n->callargs[i]->type)
 		{
 			case AST_ASSIGN:
@@ -2797,8 +2799,9 @@ static void interpret_func_call(Node *n, Stack **opstack, Stack **valstack)
 				c_error("Invalid function argument.", -1);
 				return;
 			default:
-				interpret_expr(n->callargs[i], opstack, valstack);
-				pop(*opstack);
+				// TODO: threading of call args important for binary expression as args
+				//interpret_expr(n->callargs[i], opstack, valstack);
+				//pop(*opstack);
 				break;
 		}
 	}

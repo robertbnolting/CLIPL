@@ -279,6 +279,8 @@ MnemNode *makeMnemNode(char *mnem)
 	r->vregs_used = NULL;
 	r->n_vregs_used = 0;
 
+	r->is_function_label = 0;
+
 	if (mnem[0] == '\n') {
 		r->type = NEWLINE;
 		r->mnem = "\n";
@@ -340,6 +342,7 @@ MnemNode *makeMnemNode(char *mnem)
 			int func_idx = find_function(&func_name[3]);
 			if (func_idx >= 0) {
 				current_func = func_idx;
+				r->is_function_label = 1;
 			}
 
 			free(func_name);
@@ -1089,33 +1092,33 @@ static void emit_declaration(Node *n)
 static void emit_int_arith_binop(Node *expr)
 {
 	char *op = NULL;
-	int saved_idx;
+	int left_idx;
+	int right_idx;
+
 	switch (expr->type)
 	{
 		case AST_ADD:
 			op = "add";
 
-			emit_expr(expr->left);
-			saved_idx = vregs_idx;
-			vregs_idx++;
-			vregs_count++;
 			emit_expr(expr->right);
-
+			left_idx = vregs_idx++;
+			emit_expr(expr->left);
+			right_idx = vregs_idx;
+			
 			break;
 		case AST_SUB:
 			op = "sub";
 
 			emit_expr(expr->right);
-			saved_idx = vregs_idx;
-			vregs_idx++;
-			vregs_count++;
+			left_idx = vregs_idx++;
 			emit_expr(expr->left);
+			right_idx = vregs_idx;
 
 			break;
 	}
 
 
-	emit("%s vd%d vd%d", op, vregs_idx, saved_idx);
+	emit("%s vd%d vd%d", op, right_idx, left_idx);
 }
 
 static size_t *emit_string_assign(Node *var, Node *string)
@@ -1319,9 +1322,6 @@ static void emit_func_call(Node *n)
 		emit_syscall(n->callargs, n->n_args);
 	} else {
 #define func (global_functions[idx])
-		func->called_to = realloc(func->called_to, sizeof(int)*(func->n_called_to+1));
-		func->called_to[func->n_called_to++] = ins_array_sz + 2; // +2 to account for function epilogue
-
 		for (int i = 0; i < n->n_args; i++) {
 			// TODO: handle AST-types
 			emit_expr(n->callargs[i]);
@@ -1329,6 +1329,10 @@ static void emit_func_call(Node *n)
 		}
 
 		emit("call fn_%s", func->flabel);
+
+		func->called_to = realloc(func->called_to, sizeof(int)*(func->n_called_to+1));
+		func->called_to[func->n_called_to++] = ins_array_sz ;//+ 5; // +5 to account for function epilogue
+
 
 		emit("add rsp %d", func->n_params*8);	// clean up the stack
 
@@ -1653,43 +1657,14 @@ static InterferenceNode **lva()
 			}
 
 			n = ins_array[i];
-			if (n->type >= MOV && n->type <= LEA) {
-				if (n->right->type == VIRTUAL_REG || n->right->type == REAL_REG) {
-					live = addToLiveRange(n->right->idx, live, &live_sz);
-					if (!used_vregs[n->right->idx]) {
-						used_vregs[n->right->idx] = 1;
-						used_vregs_n++;
-					}
-				} else if (n->right->type == BRACKET_EXPR) {
-					int saved = live_sz;
-					for (int i = 0; i < n->right->n_vregs_used; i++) {
-						live = addToLiveRange(n->right->vregs_used[i]->idx, live, &live_sz);
-						if (saved != live_sz && !used_vregs[n->right->vregs_used[i]->idx]) {
-							used_vregs[n->right->vregs_used[i]->idx] = 1;
-							used_vregs_n++;
-						}
-					}
-				}
-
-				if (n->left->type == VIRTUAL_REG || n->left->type == REAL_REG) {
-					if (n->left->first_def) {
-						live_del = addToLiveRange(n->left->idx, live_del, &live_del_sz);
-					} else if (!n->left->first_def && n->left->type == REAL_REG) {
-						live_del = addToLiveRange(n->left->idx, live_del, &live_del_sz);
-					}
-				} else if (n->left->type == BRACKET_EXPR) {
-					for (int i = 0; i < n->left->n_vregs_used; i++) {
-						if (n->left->vregs_used[i]->first_def) {
-							live_del = addToLiveRange(n->left->vregs_used[i]->idx, live_del, &live_del_sz);
-						}
-					}
-				}
-			} else if (n->type > LEA && n->type <= POP) { // instruction but not mov/lea
-				if (n->type <= CMP) {	// is binary operation
+			if (p == 0) {
+				if (n->type >= MOV && n->type <= LEA) {
 					if (n->right->type == VIRTUAL_REG || n->right->type == REAL_REG) {
 						live = addToLiveRange(n->right->idx, live, &live_sz);
-						used_vregs[n->right->idx] = 1;
-						used_vregs_n++;
+						if (!used_vregs[n->right->idx]) {
+							used_vregs[n->right->idx] = 1;
+							used_vregs_n++;
+						}
 					} else if (n->right->type == BRACKET_EXPR) {
 						int saved = live_sz;
 						for (int i = 0; i < n->right->n_vregs_used; i++) {
@@ -1700,21 +1675,85 @@ static InterferenceNode **lva()
 							}
 						}
 					}
-				}
-				if (n->left->type == VIRTUAL_REG || n->left->type == REAL_REG) {
-					live = addToLiveRange(n->left->idx, live, &live_sz);
-					used_vregs[n->left->idx] = 1;
-					used_vregs_n++;
-				} else if (n->left->type == BRACKET_EXPR) {
-					int saved = live_sz;
-					for (int i = 0; i < n->left->n_vregs_used; i++) {
-						live = addToLiveRange(n->left->vregs_used[i]->idx, live, &live_sz);
-						if (saved != live_sz && !used_vregs[n->left->vregs_used[i]->idx]) {
-							used_vregs[n->left->vregs_used[i]->idx] = 1;
-							used_vregs_n++;
+
+					if (n->left->type == VIRTUAL_REG || n->left->type == REAL_REG) {
+						if (n->left->first_def) {
+							live_del = addToLiveRange(n->left->idx, live_del, &live_del_sz);
+						} else if (!n->left->first_def && n->left->type == REAL_REG) {
+							live_del = addToLiveRange(n->left->idx, live_del, &live_del_sz);
+						}
+					} else if (n->left->type == BRACKET_EXPR) {
+						for (int i = 0; i < n->left->n_vregs_used; i++) {
+							if (n->left->vregs_used[i]->first_def) {
+								live_del = addToLiveRange(n->left->vregs_used[i]->idx, live_del, &live_del_sz);
+							}
 						}
 					}
-				} else if (p == 1 && (n->type >= JE && n->type <= GOTO)) {   // control-flow change instruction
+				} else if (n->type > LEA && n->type <= POP) { // instruction but not mov/lea
+					if (n->type <= CMP) {	// is binary operation
+						if (n->right->type == VIRTUAL_REG || n->right->type == REAL_REG) {
+							live = addToLiveRange(n->right->idx, live, &live_sz);
+							used_vregs[n->right->idx] = 1;
+							used_vregs_n++;
+						} else if (n->right->type == BRACKET_EXPR) {
+							int saved = live_sz;
+							for (int i = 0; i < n->right->n_vregs_used; i++) {
+								live = addToLiveRange(n->right->vregs_used[i]->idx, live, &live_sz);
+								if (saved != live_sz && !used_vregs[n->right->vregs_used[i]->idx]) {
+									used_vregs[n->right->vregs_used[i]->idx] = 1;
+									used_vregs_n++;
+								}
+							}
+						}
+					}
+					if (n->left->type == VIRTUAL_REG || n->left->type == REAL_REG) {
+						live = addToLiveRange(n->left->idx, live, &live_sz);
+						used_vregs[n->left->idx] = 1;
+						used_vregs_n++;
+					} else if (n->left->type == BRACKET_EXPR) {
+						int saved = live_sz;
+						for (int i = 0; i < n->left->n_vregs_used; i++) {
+							live = addToLiveRange(n->left->vregs_used[i]->idx, live, &live_sz);
+							if (saved != live_sz && !used_vregs[n->left->vregs_used[i]->idx]) {
+								used_vregs[n->left->vregs_used[i]->idx] = 1;
+								used_vregs_n++;
+							}
+						}
+					}
+				} else if (n->type == SYSCALL) {
+					live = addToLiveRange(0, live, &live_sz); // rax
+					live = addToLiveRange(5, live, &live_sz); // rdi
+					live = addToLiveRange(4, live, &live_sz); // rsi
+					live = addToLiveRange(3, live, &live_sz); // rdx
+					live = addToLiveRange(8, live, &live_sz); // r10
+					live = addToLiveRange(6, live, &live_sz); // r8
+					live = addToLiveRange(7, live, &live_sz); // r9
+					live = addToLiveRange(2, live, &live_sz); // rcx
+					live = addToLiveRange(9, live, &live_sz); // r11
+
+					syscall_list = realloc(syscall_list, sizeof(int) * (syscall_list_sz + 1));
+					syscall_list[syscall_list_sz++] = i;
+				}
+
+				if (i == ins_array_sz-1) {
+					live_range[i] = malloc(sizeof(int) * live_sz);
+					live_range[i] = memcpy(live_range[i], live, live_sz * sizeof(int));
+
+					live_sz_array[i] = live_sz;
+				} else {
+					live = liverange_union(live_range[i+1], live, live_sz_array[i+1], &live_sz);
+					live_range[i] = malloc(sizeof(int) * live_sz);
+					live_range[i] = memcpy(live_range[i], live, live_sz * sizeof(int));
+					live_range[i] = liverange_subtract(live_range[i], live_del, live_sz, live_del_sz);
+
+					if (live_sz >= live_del_sz) {
+						live_sz_array[i] = live_sz - live_del_sz;
+					} else {
+						live_range[i] = liverange_union(live, live_range[i], live_sz, &live_sz_array[i]);
+					}
+				}
+			} else {
+				if (n->type >= JE && n->type <= GOTO) {   // control-flow change instruction
 					char *label = n->left->mnem;
 					int *live_at_label = NULL;
 					size_t live_at_label_sz = 0;
@@ -1730,52 +1769,30 @@ static InterferenceNode **lva()
 						}
 					}
 					if (live_at_label != NULL) {
-						live = liverange_union(live_at_label, live, live_at_label_sz, &live_sz);
+						live_range[i] = liverange_union(live_at_label, live_range[i], live_at_label_sz, &live_sz_array[i]);
 					}
-				}
-			} else if (n->type == SYSCALL) {
-				live = addToLiveRange(0, live, &live_sz); // rax
-				live = addToLiveRange(5, live, &live_sz); // rdi
-				live = addToLiveRange(4, live, &live_sz); // rsi
-				live = addToLiveRange(3, live, &live_sz); // rdx
-				live = addToLiveRange(8, live, &live_sz); // r10
-				live = addToLiveRange(6, live, &live_sz); // r8
-				live = addToLiveRange(7, live, &live_sz); // r9
-				live = addToLiveRange(2, live, &live_sz); // rcx
-				live = addToLiveRange(9, live, &live_sz); // r11
-
-				if (p == 0) {
-					syscall_list = realloc(syscall_list, sizeof(int) * (syscall_list_sz + 1));
-					syscall_list[syscall_list_sz++] = i;
-				}
-			} else if (n->type == RET && p == 1) {
-				int func_idx = n->ret_belongs_to;
-				if (func_idx >= 0) {	// is function label
-					int *live_at_call = NULL;
-					size_t live_at_call_sz = 0;
-					for (int j = 0; j < global_functions[func_idx]->n_called_to; j++) {
-						int range_idx = global_functions[func_idx]->called_to[j];
+				} else if (n->type == RET) {
+					int func_idx = n->ret_belongs_to;
+					if (func_idx >= 0) {	// is function label
+						int *live_at_call = NULL;
+						size_t live_at_call_sz = 0;
+						for (int j = 0; j < global_functions[func_idx]->n_called_to; j++) {
+							int range_idx = global_functions[func_idx]->called_to[j];
 							live_at_call = live_range[range_idx];
 							live_at_call_sz = live_sz_array[range_idx];
-							live = liverange_union(live_at_call, live, live_at_call_sz, &live_sz);
+							// TODO: apply the liverange_union not only to live at ret but to all live ranges until the function label(fn_sum:)
+							for (int l = i; l >= 0; l--) {
+								live_range[l] = liverange_union(live_at_call, live_range[l], live_at_call_sz, &live_sz_array[l]);
+
+								if (ins_array[l]->is_function_label) {
+									break;
+								}
+							}
+						}
 					}
 				}
 			}
 
-			if (i == ins_array_sz-1) {
-				live_range[i] = malloc(sizeof(int) * live_sz);
-				live_range[i] = memcpy(live_range[i], live, live_sz * sizeof(int));
-
-				live_sz_array[i] = live_sz;
-			} else {
-				live = liverange_union(live_range[i+1], live, live_sz_array[i+1], &live_sz);
-				live_range[i] = malloc(sizeof(int) * live_sz);
-				live_range[i] = memcpy(live_range[i], live, live_sz * sizeof(int));
-				live_range[i] = liverange_subtract(live_range[i], live_del, live_sz, live_del_sz);
-				if (live_sz >= live_del_sz) {
-					live_sz_array[i] = live_sz - live_del_sz;
-				}
-			}
 			free(live);
 		}
 	}
@@ -2118,10 +2135,10 @@ static void sortByColor(InterferenceNode **arr, size_t len)
 			if (arr1[0]->color <= arr2[0]->color) {
 				*t = *arr1;
 				arr1++;
-		} else {
-			*t = *arr2;
-			arr2++;
-		}
+			} else {
+				*t = *arr2;
+				arr2++;
+			}
 		} else if(arr1 < arr+p) {
 			*t = *arr1;
 			arr1++;

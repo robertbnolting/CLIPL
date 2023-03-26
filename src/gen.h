@@ -54,6 +54,7 @@ typedef struct MnemNode {
 	// only for virtual registers
 	int first_def;
 	int ret_belongs_to;
+	int is_function_label;
 	int idx;
 	char mode;
 } MnemNode;
