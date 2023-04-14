@@ -173,6 +173,8 @@ typedef struct Node {
 			int *called_to;
 			size_t n_called_to;
 			struct Node *return_stmt;
+			int start_body;
+			int end_body;
 		};
 		// function call
 		struct {
@@ -219,3 +221,6 @@ typedef struct Node {
 
 void parser_init();
 int numPlaces();
+
+extern Node **global_functions;
+extern size_t global_function_count;

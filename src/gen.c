@@ -26,11 +26,9 @@ static char *B_REGS[] = {"al", "bl", "cl", "dl", "sil", "dil",
 static int vregs_idx;
 static int vregs_count;
 
-static int s_regs_count;
-
 static int stack_offset;
 
-Node **global_functions;
+//Node **global_functions;
 
 static FILE *outputfp;
 static int entrypoint_defined;
@@ -60,7 +58,7 @@ static int *getArraySizes();
 
 static InterferenceNode **lva();
 static void sortByColor();
-static void optimize();
+static void gen_nasm();
 
 #define emit(...)		emitf("\t"  __VA_ARGS__)
 #define emit_noindent(...)	emitf(__VA_ARGS__)
@@ -279,7 +277,7 @@ MnemNode *makeMnemNode(char *mnem)
 	r->vregs_used = NULL;
 	r->n_vregs_used = 0;
 
-	r->is_function_label = 0;
+	r->is_function_label = -1;
 
 	if (mnem[0] == '\n') {
 		r->type = NEWLINE;
@@ -342,7 +340,7 @@ MnemNode *makeMnemNode(char *mnem)
 			int func_idx = find_function(&func_name[3]);
 			if (func_idx >= 0) {
 				current_func = func_idx;
-				r->is_function_label = 1;
+				r->is_function_label = func_idx;
 			}
 
 			free(func_name);
@@ -515,12 +513,11 @@ static void emitf(char *fmt, ...) {
 
 void gen(Node **funcs, size_t n_funcs)
 {
-	global_functions = funcs;
+	//global_functions = funcs;
 
 	vregs_idx = MAX_REGISTER_COUNT; // 0 - MAX_REGISTER_COUNT for real regs, maybe additional type REAL_REG to be recognized in lva()
 
 	entrypoint_defined = 0;
-	s_regs_count = 0;
 
 	for (int i = 0; i < n_funcs; i++) {
 		emit_func_prologue(funcs[i]);
@@ -531,7 +528,7 @@ void gen(Node **funcs, size_t n_funcs)
 	}
 
 #if !PSEUDO_ASM_OUT
-	optimize(); 	// TODO: rename
+	gen_nasm();
 #endif
 
 	for (int i = 0; i < ins_array_sz; i++) {
@@ -640,13 +637,12 @@ static void emit_func_prologue(Node *func)
 	emit("mov rbp rsp");
 	emit("\n");
 
-	int end_prologue = ins_array_sz;
+	int end_prologue = func->start_body = ins_array_sz;
 
 	// TODO: adjust for different parameter data types
 	stack_offset = -((func->n_params+1) * 8);	// +1 to account for pushed return address
 
 	for (int i = 0; i < func->n_params; i++) {
-		//emit_declaration(func->fnparams[i]);
 		func->fnparams[i]->lvar_valproppair->loff = stack_offset;
 		stack_offset += 8;
 	}
@@ -672,6 +668,7 @@ static void emit_func_prologue(Node *func)
 	ins_array[end_prologue] = sub;
 
 	emit("\n");
+	func->end_body = ins_array_sz;
 	emit("add rsp %d", stack_offset);
 	emit("pop rbp");
 	emit("\n");
@@ -1331,8 +1328,7 @@ static void emit_func_call(Node *n)
 		emit("call fn_%s", func->flabel);
 
 		func->called_to = realloc(func->called_to, sizeof(int)*(func->n_called_to+1));
-		func->called_to[func->n_called_to++] = ins_array_sz ;//+ 5; // +5 to account for function epilogue
-
+		func->called_to[func->n_called_to++] = ins_array_sz ;
 
 		emit("add rsp %d", func->n_params*8);	// clean up the stack
 
@@ -1624,13 +1620,20 @@ static int *liverange_union(int *live1, int *live2, size_t size1, size_t *size2)
 	return live2;
 }
 
+size_t live_range_sz;
+
 static InterferenceNode **lva()
 {
-	int *live_range[ins_array_sz];
-	size_t live_sz_array[ins_array_sz];
+	live_range_sz = ins_array_sz;
+
+	int *live_range[live_range_sz];
+	size_t live_sz_array[live_range_sz];
 
 	int *used_vregs = calloc(vregs_count, sizeof(int));
 	size_t used_vregs_n = MAX_REGISTER_COUNT;
+
+	int **preserved_regs = calloc(global_function_count, sizeof(int *));
+	size_t *preserved_sz = calloc(global_function_count, sizeof(size_t));
 
 	int *syscall_list = NULL;
 	size_t syscall_list_sz = 0;
@@ -1639,15 +1642,16 @@ static InterferenceNode **lva()
 
 	InterferenceNode **interference_graph = calloc(vregs_count, sizeof(InterferenceNode));
 
+	int current_func;
 	for (int p = 0; p < 2; p++) {
-		for (int i = ins_array_sz-1; i >= 0; i--) {
+		for (int i = live_range_sz-1; i >= 0; i--) {
 			int *live = NULL;
 			size_t live_sz = 0;
 
 			int *live_del = malloc(0);
 			size_t live_del_sz = 0;
 
-			if ((i == ins_array_sz-1)  && (p == 1) && (used_vregs_n != vregs_count)) { 	// not all vregs used
+			if ((i == live_range_sz-1)  && (p == 1) && (used_vregs_n != vregs_count)) { 	// not all vregs used
 				for (int j = MAX_REGISTER_COUNT; j < vregs_count; j++) {
 					if (!used_vregs[j]) {
 						live = realloc(live, sizeof(int) * (live_sz+1));
@@ -1735,7 +1739,7 @@ static InterferenceNode **lva()
 					syscall_list[syscall_list_sz++] = i;
 				}
 
-				if (i == ins_array_sz-1) {
+				if (i == live_range_sz-1) {
 					live_range[i] = malloc(sizeof(int) * live_sz);
 					live_range[i] = memcpy(live_range[i], live, live_sz * sizeof(int));
 
@@ -1752,12 +1756,12 @@ static InterferenceNode **lva()
 						live_range[i] = liverange_union(live, live_range[i], live_sz, &live_sz_array[i]);
 					}
 				}
-			} else {
-				if (n->type >= JE && n->type <= GOTO) {   // control-flow change instruction
+			} else { 						// second pass
+				if (n->type >= JE && n->type <= GOTO) {		// control-flow change instruction
 					char *label = n->left->mnem;
 					int *live_at_label = NULL;
 					size_t live_at_label_sz = 0;
-					for (int j = 0; j < ins_array_sz; j++) {
+					for (int j = 0; j < live_range_sz; j++) {
 						if (ins_array[j]->type == LABEL) {
 							if (!strcmp(ins_array[j]->mnem, label)) {
 								if (j < i) {
@@ -1771,31 +1775,55 @@ static InterferenceNode **lva()
 					if (live_at_label != NULL) {
 						live_range[i] = liverange_union(live_at_label, live_range[i], live_at_label_sz, &live_sz_array[i]);
 					}
-				} else if (n->type == RET) {
-					int func_idx = n->ret_belongs_to;
-					if (func_idx >= 0) {	// is function label
-						int *live_at_call = NULL;
-						size_t live_at_call_sz = 0;
-						for (int j = 0; j < global_functions[func_idx]->n_called_to; j++) {
-							int range_idx = global_functions[func_idx]->called_to[j];
-							live_at_call = live_range[range_idx];
-							live_at_call_sz = live_sz_array[range_idx];
-							// TODO: apply the liverange_union not only to live at ret but to all live ranges until the function label(fn_sum:)
-							for (int l = i; l >= 0; l--) {
-								live_range[l] = liverange_union(live_at_call, live_range[l], live_at_call_sz, &live_sz_array[l]);
-
-								if (ins_array[l]->is_function_label) {
-									break;
-								}
-							}
+				} else if (n->type == CALL) {		// inter-procedural preserving of registers
+					for (int l = 0; l < live_sz_array[i]; l++) {
+						if (live_range[i][l] >= MAX_REGISTER_COUNT) {
+							preserved_regs[current_func] = realloc(preserved_regs[current_func], sizeof(int) * (preserved_sz[current_func] + 1));
+							preserved_regs[current_func][preserved_sz[current_func]++] = live_range[i][l];
 						}
 					}
+				} else if (n->type == RET) {
+					current_func = n->ret_belongs_to;
 				}
 			}
 
 			free(live);
 		}
 	}
+
+#define func (global_functions[i])
+	for (int i = 0; i < global_function_count; i++) {
+		if (preserved_sz[i] > 0) {
+			ins_array = realloc(ins_array, (ins_array_sz + (2*preserved_sz[i])) * sizeof(MnemNode *));
+
+			// make space for inserting push instructions for saving regs at start of function body
+			memmove(&ins_array[func->start_body + preserved_sz[i]], &ins_array[func->start_body], sizeof(MnemNode *) * (ins_array_sz - func->start_body));
+			ins_array_sz += preserved_sz[i];
+
+			// make space for inserting pop instructions for retrieve regs at end of function body
+			memmove(&ins_array[func->end_body + preserved_sz[i]], &ins_array[func->end_body], sizeof(MnemNode *) * (ins_array_sz - func->end_body));
+			ins_array_sz += preserved_sz[i];
+
+			MnemNode *n;
+			for (int j = 0; j < preserved_sz[i]; j++) {
+				char *reg = malloc(10);
+				sprintf(reg, "v%d", preserved_regs[i][j]);
+
+				n = makeMnemNode("\tpush");
+				n->left = makeMnemNode(reg);
+
+				ins_array[func->start_body+j] = n;
+
+				n = makeMnemNode("\tpop");
+				n->left = makeMnemNode(reg);
+
+				ins_array[func->end_body+j] = n;
+
+				free(reg);
+			}
+		}
+	}
+#undef func
 
 	for (int i = 0; i < syscall_list_sz; i++) {
 		int unused_arg_regs[7];
@@ -1812,8 +1840,7 @@ static InterferenceNode **lva()
 		} else {
 			for (int j = 0; j < live_sz_array[idx]; j++) {
 				if (is_sc_arg(live_range[idx][j])) {
-					unused_arg_regs[unused_arg_regs_sz++] = live_range[idx][j];
-				}
+					unused_arg_regs[unused_arg_regs_sz++] = live_range[idx][j]; }
 			}
 		}
 #undef is_sc_arg
@@ -1837,7 +1864,7 @@ static InterferenceNode **lva()
 	}
 
 	// create InterferenceNode for every live variable
-	for (int i = 0; i < ins_array_sz; i++) {
+	for (int i = 0; i < live_range_sz; i++) {
 		int *live = live_range[i];
 		size_t live_sz = live_sz_array[i];
 
@@ -2074,7 +2101,7 @@ static char *substitute_vreg(char *str, char *reg)
 
 static void assign_registers(InterferenceNode **g)
 {
-	for (int i = 0; i < ins_array_sz; i++) {
+	for (int i = 0; i < live_range_sz; i++) {
 		MnemNode *n = ins_array[i];
 		if (MOV <= n->type && RET >= n->type) {
 			if (n->left->type == VIRTUAL_REG) {
@@ -2155,7 +2182,7 @@ static void sortByColor(InterferenceNode **arr, size_t len)
 	free(rt);
 }
 
-static void optimize()
+static void gen_nasm()
 {
 	vregs_count = vregs_idx;
 

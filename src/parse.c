@@ -95,8 +95,8 @@ static void interpret_binary_ident_expr();
 static void interpret_binary_idx_expr();
 
 // Parser start
-static Node **global_functions;
-static size_t global_function_count;
+Node **global_functions;
+size_t global_function_count;
 
 static Node **global_records;
 static size_t global_record_count;
@@ -1780,6 +1780,7 @@ static void thread_block(Node **block, size_t block_size)
 	}
 }
 
+Node *current_function;
 static void thread_expression(Node *expr)
 {
 	Node *aux;
@@ -1787,6 +1788,7 @@ static void thread_expression(Node *expr)
 	switch (expr->type)
 	{
 		case AST_FUNCTION_DEF:
+			current_function = expr;
 			last_node->successor = expr;
 			last_node = expr;
 			thread_block(expr->fnbody, expr->n_stmts);
@@ -1857,12 +1859,11 @@ static void thread_expression(Node *expr)
 
 			break;
 		case AST_FUNCTION_CALL:
-		{
 			thread_block(expr->callargs, expr->n_args);
 
 			last_node->successor = expr;
 			last_node = expr;
-		}
+
 			break;
 		case AST_RETURN_STMT:
 			if (expr->retval == NULL) {
@@ -1872,6 +1873,8 @@ static void thread_expression(Node *expr)
 			} else {
 				thread_expression(expr->retval);
 			}
+
+			current_function->return_stmt = expr;
 
 			last_node->successor = expr;
 			last_node = expr;
@@ -2759,7 +2762,17 @@ static void interpret_binary_expr(Node *operator, Stack *opstack, Stack *valstac
 			interpret_binary_idx_expr(l_operand, r_operand, operator, opstack, valstack);
 			break;
 		case AST_FUNCTION_CALL:
-			push(opstack, global_functions[l_operand->global_function_idx]->return_stmt->retval);
+			switch (global_functions[l_operand->global_function_idx]->return_type)
+			{
+				case TYPE_INT:
+					push(opstack, ast_inttype(0));
+					break;
+				case TYPE_STRING:
+					push(opstack, ast_stringtype("", -1, 0));
+					break;
+				default:
+					c_error("Not implemented.", -1);
+			}
 			push(opstack, r_operand);
 
 			interpret_binary_expr(operator, opstack, valstack);
@@ -2798,11 +2811,6 @@ static void interpret_func_call(Node *n, Stack **opstack, Stack **valstack)
 			case AST_RETURN_STMT:
 				c_error("Invalid function argument.", -1);
 				return;
-			default:
-				// TODO: threading of call args important for binary expression as args
-				//interpret_expr(n->callargs[i], opstack, valstack);
-				//pop(*opstack);
-				break;
 		}
 	}
 }
@@ -2816,7 +2824,6 @@ static void interpret_if_stmt(Node *stmt, Stack *opstack, Stack *valstack)
 	}
 }
 
-Node *current_function;
 static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 {
 	if (expr == NULL || expr->type == CFG_JOIN_NODE) {
@@ -2964,7 +2971,7 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 		case AST_FUNCTION_CALL:
 		{
 			int idx = find_function(expr->call_label);
-			if (idx == -1 || idx > current_function->global_idx) {
+			if (idx == -1 /*|| idx > current_function->global_idx*/) {
 				char *msg = malloc(128);
 				sprintf(msg, "No function with name '%s' was found.", expr->call_label);
 				c_error(msg, -1);
@@ -3040,6 +3047,24 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 				case AST_FUNCTION_CALL:
 					expr->rettype = global_functions[retval->global_function_idx]->return_type;
 					break;
+				case AST_ADD:
+				case AST_SUB:
+				case AST_MUL:
+				case AST_DIV:
+				case AST_ASSIGN:
+				case AST_ADD_ASSIGN:
+				case AST_SUB_ASSIGN:
+				case AST_MUL_ASSIGN:
+				case AST_DIV_ASSIGN:
+				case AST_GT:
+				case AST_LT:
+				case AST_EQ:
+				case AST_NE:
+				case AST_GE:
+				case AST_LE:
+					expr->rettype = retval->result_type;
+					break;
+
 				default:
 					expr->rettype = retval->type;
 					break;
@@ -3050,8 +3075,6 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 				sprintf(&msg[0], "Type of return value does not match return value of function %s.", current_function->flabel);
 				c_error(msg, -1);
 			}
-
-			current_function->return_stmt = expr;
 
 			interpret_expr(expr->successor, opstack, valstack);
 			break;
