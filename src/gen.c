@@ -28,8 +28,6 @@ static int vregs_count;
 
 static int stack_offset;
 
-//Node **global_functions;
-
 static FILE *outputfp;
 static int entrypoint_defined;
 
@@ -1621,6 +1619,7 @@ static int *liverange_union(int *live1, int *live2, size_t size1, size_t *size2)
 }
 
 size_t live_range_sz;
+size_t used_vregs_n;
 
 static InterferenceNode **lva()
 {
@@ -1629,8 +1628,8 @@ static InterferenceNode **lva()
 	int *live_range[live_range_sz];
 	size_t live_sz_array[live_range_sz];
 
-	int *used_vregs = calloc(vregs_count, sizeof(int));
-	size_t used_vregs_n = MAX_REGISTER_COUNT;
+	int *used_vregs = calloc(vregs_count-MAX_REGISTER_COUNT, sizeof(int));
+	used_vregs_n = 0;
 
 	int **preserved_regs = calloc(global_function_count, sizeof(int *));
 	size_t *preserved_sz = calloc(global_function_count, sizeof(size_t));
@@ -1651,30 +1650,23 @@ static InterferenceNode **lva()
 			int *live_del = malloc(0);
 			size_t live_del_sz = 0;
 
-			if ((i == live_range_sz-1)  && (p == 1) && (used_vregs_n != vregs_count)) { 	// not all vregs used
-				for (int j = MAX_REGISTER_COUNT; j < vregs_count; j++) {
-					if (!used_vregs[j]) {
-						live = realloc(live, sizeof(int) * (live_sz+1));
-						live[live_sz++] = j;
-					}
-				}
-			}
-
 			n = ins_array[i];
 			if (p == 0) {
 				if (n->type >= MOV && n->type <= LEA) {
 					if (n->right->type == VIRTUAL_REG || n->right->type == REAL_REG) {
 						live = addToLiveRange(n->right->idx, live, &live_sz);
-						if (!used_vregs[n->right->idx]) {
-							used_vregs[n->right->idx] = 1;
+						if (!used_vregs[n->right->idx-MAX_REGISTER_COUNT] && n->right->type == VIRTUAL_REG) {
+							used_vregs[n->right->idx - MAX_REGISTER_COUNT] = 1;
 							used_vregs_n++;
 						}
 					} else if (n->right->type == BRACKET_EXPR) {
 						int saved = live_sz;
 						for (int i = 0; i < n->right->n_vregs_used; i++) {
 							live = addToLiveRange(n->right->vregs_used[i]->idx, live, &live_sz);
-							if (saved != live_sz && !used_vregs[n->right->vregs_used[i]->idx]) {
-								used_vregs[n->right->vregs_used[i]->idx] = 1;
+							if (saved != live_sz && !used_vregs[n->right->vregs_used[i]->idx-MAX_REGISTER_COUNT]
+							&& n->right->vregs_used[i]->type == VIRTUAL_REG) {
+
+								used_vregs[n->right->vregs_used[i]->idx - MAX_REGISTER_COUNT] = 1;
 								used_vregs_n++;
 							}
 						}
@@ -1697,14 +1689,18 @@ static InterferenceNode **lva()
 					if (n->type <= CMP) {	// is binary operation
 						if (n->right->type == VIRTUAL_REG || n->right->type == REAL_REG) {
 							live = addToLiveRange(n->right->idx, live, &live_sz);
-							used_vregs[n->right->idx] = 1;
-							used_vregs_n++;
+							if (!used_vregs[n->right->idx-MAX_REGISTER_COUNT] && n->right->type == VIRTUAL_REG) {
+								used_vregs[n->right->idx-MAX_REGISTER_COUNT] = 1;
+								used_vregs_n++;
+							}
 						} else if (n->right->type == BRACKET_EXPR) {
 							int saved = live_sz;
 							for (int i = 0; i < n->right->n_vregs_used; i++) {
 								live = addToLiveRange(n->right->vregs_used[i]->idx, live, &live_sz);
-								if (saved != live_sz && !used_vregs[n->right->vregs_used[i]->idx]) {
-									used_vregs[n->right->vregs_used[i]->idx] = 1;
+								if (saved != live_sz && !used_vregs[n->right->vregs_used[i]->idx-MAX_REGISTER_COUNT]
+								&& n->right->vregs_used[i]->type == VIRTUAL_REG) {
+
+									used_vregs[n->right->vregs_used[i]->idx - MAX_REGISTER_COUNT] = 1;
 									used_vregs_n++;
 								}
 							}
@@ -1712,16 +1708,22 @@ static InterferenceNode **lva()
 					}
 					if (n->left->type == VIRTUAL_REG || n->left->type == REAL_REG) {
 						live = addToLiveRange(n->left->idx, live, &live_sz);
-						used_vregs[n->left->idx] = 1;
-						used_vregs_n++;
+						if (!used_vregs[n->left->idx-MAX_REGISTER_COUNT] && n->left->type == VIRTUAL_REG) {
+							used_vregs[n->left->idx-MAX_REGISTER_COUNT] = 1;
+							used_vregs_n++;
+						}
 					} else if (n->left->type == BRACKET_EXPR) {
 						int saved = live_sz;
 						for (int i = 0; i < n->left->n_vregs_used; i++) {
 							live = addToLiveRange(n->left->vregs_used[i]->idx, live, &live_sz);
-							if (saved != live_sz && !used_vregs[n->left->vregs_used[i]->idx]) {
-								used_vregs[n->left->vregs_used[i]->idx] = 1;
+
+							if (saved != live_sz && !used_vregs[n->left->vregs_used[i]->idx-MAX_REGISTER_COUNT]
+							&& n->left->vregs_used[i]->type == VIRTUAL_REG) {
+
+								used_vregs[n->left->vregs_used[i]->idx - MAX_REGISTER_COUNT] = 1;
 								used_vregs_n++;
 							}
+
 						}
 					}
 				} else if (n->type == SYSCALL) {
@@ -1775,7 +1777,7 @@ static InterferenceNode **lva()
 					if (live_at_label != NULL) {
 						live_range[i] = liverange_union(live_at_label, live_range[i], live_at_label_sz, &live_sz_array[i]);
 					}
-				} else if (n->type == CALL) {		// inter-procedural preserving of registers
+				} else if (n->type == CALL) {			// inter-procedural preserving of registers
 					for (int l = 0; l < live_sz_array[i]; l++) {
 						if (live_range[i][l] >= MAX_REGISTER_COUNT) {
 							preserved_regs[current_func] = realloc(preserved_regs[current_func], sizeof(int) * (preserved_sz[current_func] + 1));
@@ -1826,11 +1828,11 @@ static InterferenceNode **lva()
 #undef func
 
 	for (int i = 0; i < syscall_list_sz; i++) {
-		int unused_arg_regs[7];
+		int unused_arg_regs[9];
 		size_t unused_arg_regs_sz = 0;
 
 #define idx 		(syscall_list[i+1]+1) // last instruction before the next syscall
-#define is_sc_arg(x)	( (x==0) || (x==5) || (x==4) || (x==3) || (x==8) || (x==6) || (x==7) )
+#define is_sc_arg(x)	( (x==0) || (x==5) || (x==4) || (x==3) || (x==8) || (x==6) || (x==7) || (x==2) || (x==9) )
 		if (i == syscall_list_sz-1) {
 			for (int j = 0; j < live_sz_array[0]; j++) {
 				if (is_sc_arg(live_range[0][j])) {
@@ -1840,7 +1842,8 @@ static InterferenceNode **lva()
 		} else {
 			for (int j = 0; j < live_sz_array[idx]; j++) {
 				if (is_sc_arg(live_range[idx][j])) {
-					unused_arg_regs[unused_arg_regs_sz++] = live_range[idx][j]; }
+					unused_arg_regs[unused_arg_regs_sz++] = live_range[idx][j];
+				}
 			}
 		}
 #undef is_sc_arg
@@ -1911,7 +1914,11 @@ static InterferenceNode **lva()
 #if 1
 		printf("LIVE at %d: ", i);
 		for (int j = 0; j < live_sz; j++) {
-			printf("%d, ", live[j]);
+			if (live[j] >= MAX_REGISTER_COUNT) {
+				printf("%d, ", live[j]);
+			} else {
+				printf("%s, ", Q_REGS[live[j]]);
+			}
 		}
 		printf("\n---\n");
 #endif
@@ -1919,10 +1926,18 @@ static InterferenceNode **lva()
 
 #if 1
 	for (int i = 0; i < vregs_count; i++) {
-		printf("Neighbors of v%d:\n", i);
+		if (i >= MAX_REGISTER_COUNT) {
+			printf("Neighbors of v%d:\n", i);
+		} else {
+			printf("Neighbors of %s:\n", Q_REGS[i]);
+		}
 		if (interference_graph[i]) {
 			for (int j = 0; j < interference_graph[i]->neighbor_count; j++) {
+				if (interference_graph[i]->neighbors[j]->idx >= MAX_REGISTER_COUNT) {
 					printf("\tv%d\n", interference_graph[i]->neighbors[j]->idx);
+				} else {
+					printf("\t%s\n", Q_REGS[interference_graph[i]->neighbors[j]->idx]);
+				}
 			}
 		} else {
 			printf("v%d is unused.\n", i);
@@ -1943,8 +1958,8 @@ static void color(InterferenceNode **g)
 		}
 	}
 
-	int colored_nodes = MAX_REGISTER_COUNT;
-	while (colored_nodes < vregs_count) {
+	int colored_nodes = 0;
+	while (colored_nodes < used_vregs_n) {
 		InterferenceNode *highest_sat = NULL;
 		// calculate saturation of each node
 		for (int i = MAX_REGISTER_COUNT; i < vregs_count; i++) {
@@ -1971,7 +1986,7 @@ static void color(InterferenceNode **g)
 								if (highest_sat->neighbors[j]->color < 0)
 									uncolored_neighbors_highest++;
 							}
-							
+
 							if (uncolored_neighbors_current > uncolored_neighbors_highest) {
 								highest_sat = g[i];
 							}
@@ -1979,6 +1994,7 @@ static void color(InterferenceNode **g)
 					}
 				}
 			}
+		
 		}
 
 		if (highest_sat->neighbor_count) {
@@ -2109,6 +2125,11 @@ static void assign_registers(InterferenceNode **g)
 				if (reg) {
 					n->left->mnem = realloc(n->left->mnem, strlen(reg)+1);
 					strcpy(n->left->mnem, reg);
+				} else {	// instructions operating on unused vregs are discarded
+					memmove(&ins_array[i], &ins_array[i+1], sizeof(MnemNode *) * (ins_array_sz - i));
+					ins_array_sz--;
+					live_range_sz--;
+					i--;
 				}
 			} else if (n->left->type == BRACKET_EXPR) {
 				for (int i = 0; i < n->left->n_vregs_used; i++) {
