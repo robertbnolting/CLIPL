@@ -104,6 +104,21 @@ static void getStringLens(Node *n, size_t *pair)
 			pair[0] = n->slen;
 			pair[1] = n->s_allocated;
 			break;
+		case AST_ADD:
+		{
+			getStringLens(n->left, pair);
+			int saved_pair[2];
+			saved_pair[0] = pair[0];
+			saved_pair[1] = pair[1];
+
+			getStringLens(n->right, pair);
+			pair[0] += saved_pair[0];
+			pair[1] += saved_pair[1];
+		}
+			break;
+		default:
+			c_error("Not implemented.", -1);
+			break;
 	}
 }
 
@@ -637,15 +652,35 @@ static void emit_func_prologue(Node *func)
 
 	int end_prologue = func->start_body = ins_array_sz;
 
-	// TODO: adjust for different parameter data types
-	stack_offset = -((func->n_params+1) * 8);	// +1 to account for pushed return address
-
-	for (int i = 0; i < func->n_params; i++) {
-		func->fnparams[i]->lvar_valproppair->loff = stack_offset;
-		stack_offset += 8;
-	}
-
 	stack_offset = 0;
+	int param_offset = 2;	// 2 to account for pushed return address/pushed rbp
+
+	for (int i = func->n_params-1; i >= 0; i--) {
+		switch (func->fnparams[i]->lvar_valproppair->type)
+		{
+		case TYPE_STRING:
+			stack_offset += 12;
+
+			emit("mov v%d [rbp+%d]", vregs_idx, 8 * param_offset++);
+			emit("mov v%d [v%d]", vregs_idx, vregs_idx);
+			emit("mov [rbp-%d] vd%d", stack_offset, vregs_idx++);
+			emit("mov v%d [rbp+%d]", vregs_idx, 8 * param_offset++);
+			emit("mov [rbp-%d] v%d", stack_offset-4, vregs_idx++);
+
+			func->fnparams[i]->lvar_valproppair->loff = stack_offset;
+			break;
+		case TYPE_INT:
+			stack_offset += 4;
+
+			emit("mov vd%d [rbp+%d]", vregs_idx, 8 * param_offset++);
+			emit("mov [rbp-%d] vd%d", stack_offset, vregs_idx++);
+
+			func->fnparams[i]->lvar_valproppair->loff = stack_offset;
+			break;
+		default:
+			c_error("Not implemented.", -1);
+		}
+	}
 
 	emit("\n");
 	emit_block(func->fnbody, func->n_stmts);
@@ -666,9 +701,9 @@ static void emit_func_prologue(Node *func)
 	ins_array[end_prologue] = sub;
 
 	emit("\n");
-	func->end_body = ins_array_sz;
 	emit("add rsp %d", stack_offset);
 	emit("pop rbp");
+	func->end_body = ins_array_sz;
 	emit("\n");
 
 	if (func->is_fn_entrypoint) {
@@ -1317,16 +1352,61 @@ static void emit_func_call(Node *n)
 		emit_syscall(n->callargs, n->n_args);
 	} else {
 #define func (global_functions[idx])
+		int arg_type;
 		for (int i = 0; i < n->n_args; i++) {
-			// TODO: handle AST-types
 			emit_expr(n->callargs[i]);
-			emit("push v%d", vregs_idx++);
+
+			switch (n->callargs[i]->type)
+			{
+			case AST_INT:
+			case AST_STRING:
+				arg_type = n->callargs[i]->type;
+				break;
+			case AST_IDENT:
+				arg_type = n->callargs[i]->lvar_valproppair->type;
+				break;
+			case AST_ADD:
+			case AST_SUB:
+			case AST_MUL:
+			case AST_DIV:
+			case AST_GT:
+			case AST_LT:
+			case AST_EQ:
+			case AST_NE:
+			case AST_GE:
+			case AST_LE:
+				arg_type = n->callargs[i]->result_type;
+				break;
+			}
+
+			// TODO: propagate string values (valproppair) from callargs to func params
+			switch (arg_type)
+			{
+			case AST_INT:
+				emit("push v%d", vregs_idx++);
+				break;
+			case AST_STRING:
+			{
+				emit("push v%d", vregs_idx-2);
+				emit("push v%d", vregs_idx-1);
+
+				size_t *pair = malloc(sizeof(size_t) * 2);
+				getStringLens(n->callargs[i], pair);
+
+				func->fnparams[i]->lvar_valproppair->slen = pair[0];
+				func->fnparams[i]->lvar_valproppair->s_allocated = pair[1];
+			}
+				break;
+
+			default:
+				c_error("Not implemented.", -1);
+			}
 		}
 
 		emit("call fn_%s", func->flabel);
 
 		func->called_to = realloc(func->called_to, sizeof(int)*(func->n_called_to+1));
-		func->called_to[func->n_called_to++] = ins_array_sz ;
+		func->called_to[func->n_called_to++] = ins_array_sz;
 
 		emit("add rsp %d", func->n_params*8);	// clean up the stack
 
@@ -1621,6 +1701,7 @@ static int *liverange_union(int *live1, int *live2, size_t size1, size_t *size2)
 size_t live_range_sz;
 size_t used_vregs_n;
 
+// TODO: same line cannot be same real regs
 static InterferenceNode **lva()
 {
 	live_range_sz = ins_array_sz;

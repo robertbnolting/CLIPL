@@ -2971,7 +2971,7 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 		case AST_FUNCTION_CALL:
 		{
 			int idx = find_function(expr->call_label);
-			if (idx == -1 /*|| idx > current_function->global_idx*/) {
+			if (idx == -1) {
 				char *msg = malloc(128);
 				sprintf(msg, "No function with name '%s' was found.", expr->call_label);
 				c_error(msg, -1);
