@@ -144,6 +144,8 @@ static int is_instruction_mnemonic(char *mnem)
 		return SUB; 
 	} else if (MATCHES("imul")) {
 		return IMUL;
+	} else if (MATCHES("div")) {
+		return DIV;
 	} else if (MATCHES("and")) {
 		return AND;
 	} else if (MATCHES("shr")) {
@@ -217,6 +219,8 @@ static int is_unary_mnemonic(char *mnem)
 		return INC;
 	} else if (MATCHES("dec")) {
 		return DEC;
+	} else if (MATCHES("div")) {
+		return DIV;
 	} else if (MATCHES("neg")) {
 		return NEG;
 	} else if (MATCHES("not")) {
@@ -354,7 +358,7 @@ MnemNode *makeMnemNode(char *mnem)
 			type = VIRTUAL_REG;
 		} else if (mnem_p[strlen(mnem)-1] == ':') {
 			type = LABEL;
-			if (strncmp(mnem_p, "Loop", 4))
+			if (!strncmp(mnem_p, "Loop", 4))
 				in_loop++;
 
 			char *func_name = malloc(strlen(mnem));
@@ -1134,34 +1138,62 @@ static void emit_declaration(Node *n)
 
 static void emit_int_arith_binop(Node *expr)
 {
-	char *op = NULL;
 	int left_idx;
 	int right_idx;
 
 	switch (expr->type)
 	{
 		case AST_ADD:
-			op = "add";
-
 			emit_expr(expr->right);
-			left_idx = vregs_idx++;
+			right_idx = vregs_idx++;
 			emit_expr(expr->left);
-			right_idx = vregs_idx;
-			
+			left_idx = vregs_idx;
+
+			emit("add vd%d vd%d", left_idx, right_idx);
 			break;
 		case AST_SUB:
-			op = "sub";
-
 			emit_expr(expr->right);
-			left_idx = vregs_idx++;
+			right_idx = vregs_idx++;
 			emit_expr(expr->left);
-			right_idx = vregs_idx;
+			left_idx = vregs_idx;
 
+			emit("sub vd%d vd%d", left_idx, right_idx);
+			break;
+		case AST_MUL:
+			emit_expr(expr->right);
+			right_idx = vregs_idx++;
+			emit_expr(expr->left);
+			left_idx = vregs_idx;
+
+			emit("imul vd%d vd%d", left_idx, right_idx);
+			break;
+		case AST_DIV:
+			emit_expr(expr->right);
+			right_idx = vregs_idx++;
+			emit_expr(expr->left);
+			left_idx = vregs_idx;
+
+			emit("mov rdx 0");
+			emit("mov rax v%d", left_idx);
+
+			emit("div v%d", right_idx);
+
+			emit("mov v%d rax", left_idx);
+			break;
+		case AST_MOD:
+			emit_expr(expr->right);
+			right_idx = vregs_idx++;
+			emit_expr(expr->left);
+			left_idx = vregs_idx;
+
+			emit("mov rdx 0");
+			emit("mov rax v%d", left_idx);
+
+			emit("div v%d", right_idx);
+
+			emit("mov v%d rdx", left_idx);
 			break;
 	}
-
-
-	emit("%s vd%d vd%d", op, right_idx, left_idx);
 }
 
 static size_t *emit_string_assign(Node *var, Node *string)
@@ -1336,6 +1368,9 @@ static void op(Node *expr)
 	{
 	case AST_ADD:
 	case AST_SUB:
+	case AST_MUL:
+	case AST_DIV:
+	case AST_MOD:
 		if (expr->result_type == TYPE_INT) {
 			emit_int_arith_binop(expr);
 		}
@@ -1384,6 +1419,7 @@ static void emit_func_call(Node *n)
 			case AST_SUB:
 			case AST_MUL:
 			case AST_DIV:
+			case AST_MOD:
 			case AST_GT:
 			case AST_LT:
 			case AST_EQ:
@@ -1680,20 +1716,17 @@ static int *addToLiveRange(int idx, int *live, size_t *live_sz)
 
 static int *liverange_subtract(int *live1, int *live2, size_t *size1, size_t size2)
 {
-	int deleted = 0;
 	for (int i = 0; i < size2; i++) {
 		for (int j = 0; j < *size1; j++) {
 			if (live2[i] == live1[j]) {
-				if (*size1 > 1) {
+				if (*size1 > 0) {
 					memmove(&live1[j], &live1[j+1], sizeof(int) * (*size1 - (j+1)));
 					(*size1)--;
-					deleted++;
 				}
 			}
 		}
 	}
 
-	//*size1 -= deleted;
 	return live1;
 }
 
@@ -1830,6 +1863,10 @@ static InterferenceNode **lva()
 							}
 
 						}
+					}
+					if (n->type == DIV) {
+						live = addToLiveRange(0, live, &live_sz);
+						live = addToLiveRange(3, live, &live_sz);
 					}
 				} else if (n->type == SYSCALL) {
 					live = addToLiveRange(0, live, &live_sz); // rax

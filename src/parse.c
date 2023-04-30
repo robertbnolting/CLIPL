@@ -283,6 +283,8 @@ static const char *tokenclassToString(int tclass)
 			return "*=";
 		case DIV_ASSIGN:
 			return "/=";
+		case MOD_ASSIGN:
+			return "%%=";
 		case ARROW_OP:
 			return "->";
 		default:
@@ -396,6 +398,9 @@ static void printNode(Node *n)
 		case AST_DIV:
 			printf("(/)\n");
 			break;
+		case AST_MOD:
+			printf("(%%)\n");
+			break;
 		case AST_ASSIGN:
 			printf("(=)\n");
 			break;
@@ -410,6 +415,9 @@ static void printNode(Node *n)
 			break;
 		case AST_DIV_ASSIGN:
 			printf("(/=)\n");
+			break;
+		case AST_MOD_ASSIGN:
+			printf("(%%=)\n");
 			break;
 		case AST_GT:
 			printf("(>)\n");
@@ -513,6 +521,11 @@ static void traverse(Node *root)
 			printf("(DIV: /) ");
 			traverse(root->right);
 			break;
+		case AST_MOD:
+			traverse(root->left);
+			printf("(MOD: %%) ");
+			traverse(root->right);
+			break;
 		case AST_ASSIGN:
 			traverse(root->left);
 			printf("(ASSIGN: =) ");
@@ -536,6 +549,11 @@ static void traverse(Node *root)
 		case AST_DIV_ASSIGN:
 			traverse(root->left);
 			printf("(DIV ASSIGN: /=) ");
+			traverse(root->right);
+			break;
+		case AST_MOD_ASSIGN:
+			traverse(root->left);
+			printf("(MOD ASSIGN: %%=) ");
 			traverse(root->right);
 			break;
 		case AST_GT:
@@ -845,6 +863,8 @@ static Node *ast_binop(int op, Node *lhs, Node *rhs)
 			return makeNode(&(Node){AST_MUL, .left=lhs, .right=rhs});
 		case '/':
 			return makeNode(&(Node){AST_DIV, .left=lhs, .right=rhs});
+		case '%':
+			return makeNode(&(Node){AST_MOD, .left=lhs, .right=rhs});
 		case '=':
 			return makeNode(&(Node){AST_ASSIGN, .left=lhs, .right=rhs});
 		case '>':
@@ -859,6 +879,8 @@ static Node *ast_binop(int op, Node *lhs, Node *rhs)
 			return makeNode(&(Node){AST_MUL_ASSIGN, .left=lhs, .right=rhs});
 		case DIV_ASSIGN:
 			return makeNode(&(Node){AST_DIV_ASSIGN, .left=lhs, .right=rhs});
+		case MOD_ASSIGN:
+			return makeNode(&(Node){AST_MOD_ASSIGN, .left=lhs, .right=rhs});
 		case EQ:
 			return makeNode(&(Node){AST_EQ, .left=lhs, .right=rhs});
 		case NE:
@@ -1404,6 +1426,9 @@ static Node *read_assignment_expr()
 	} else if (curr()->class == DIV_ASSIGN) {
 		next();
 		r = ast_binop(DIV_ASSIGN, r, read_assignment_expr());
+	} else if (curr()->class == MOD_ASSIGN) {
+		next();
+		r = ast_binop(MOD_ASSIGN, r, read_assignment_expr());
 	}
 
 	return r;
@@ -1540,6 +1565,9 @@ static Node *read_multiplicative_expr()
 		} else if (curr()->class == '/') {
 			next();
 			r = ast_binop('/', r, read_primary_expr());
+		} else if (curr()->class == '%') {
+			next();
+			r = ast_binop('%', r, read_primary_expr());
 		} else {
 			return r;
 		}
@@ -1814,11 +1842,13 @@ static void thread_expression(Node *expr)
 		case AST_SUB:
 		case AST_MUL:
 		case AST_DIV:
+		case AST_MOD:
 		case AST_ASSIGN:
 		case AST_ADD_ASSIGN:
 		case AST_SUB_ASSIGN:
 		case AST_MUL_ASSIGN:
 		case AST_DIV_ASSIGN:
+		case AST_MOD_ASSIGN:
 		case AST_GT:
 		case AST_LT:
 		case AST_EQ:
@@ -2396,6 +2426,7 @@ static void interpret_assignment_expr(Node *expr, Stack *opstack, Stack *valstac
 			case AST_SUB:
 			case AST_MUL:
 			case AST_DIV:
+			case AST_MOD:
 			case AST_GT:
 			case AST_LT:
 			case AST_EQ:
@@ -2489,6 +2520,7 @@ static void interpret_binary_int_expr(Node *r_operand, Node *operator, Stack *op
 		case AST_SUB:
 		case AST_MUL:
 		case AST_DIV:
+		case AST_MOD:
 			push(opstack, ast_inttype(1));
 			break;
 		case AST_GT:
@@ -2803,6 +2835,7 @@ static void interpret_func_call(Node *n, Stack **opstack, Stack **valstack)
 			case AST_SUB_ASSIGN:
 			case AST_MUL_ASSIGN:
 			case AST_DIV_ASSIGN:
+			case AST_MOD_ASSIGN:
 			case AST_DECLARATION:
 			case AST_RECORD_DEF:
 			case AST_FUNCTION_DEF:
@@ -2946,6 +2979,7 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 		case AST_SUB:
 		case AST_MUL:
 		case AST_DIV:
+		case AST_MOD:
 		case AST_GT:
 		case AST_LT:
 		case AST_EQ:
@@ -3051,11 +3085,13 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 				case AST_SUB:
 				case AST_MUL:
 				case AST_DIV:
+				case AST_MOD:
 				case AST_ASSIGN:
 				case AST_ADD_ASSIGN:
 				case AST_SUB_ASSIGN:
 				case AST_MUL_ASSIGN:
 				case AST_DIV_ASSIGN:
+				case AST_MOD_ASSIGN:
 				case AST_GT:
 				case AST_LT:
 				case AST_EQ:

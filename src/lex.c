@@ -233,6 +233,15 @@ static void handle_operator()
 				Token.class = current;
 			}
 			break;
+		case '%':
+			next_char();
+			if (current == '=') {
+				Token.class = MOD_ASSIGN;
+			} else {
+				ungetch();
+				Token.class = current;
+			}
+			break;
 		case '>':
 			next_char();
 			switch(current)

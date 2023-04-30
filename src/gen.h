@@ -13,6 +13,7 @@ enum MnemType {
 	CMP,
 	INC,
 	DEC,
+	DIV,
 	NEG,
 	NOT,
 	JE,
