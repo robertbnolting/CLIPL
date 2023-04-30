@@ -55,6 +55,7 @@ typedef struct MnemNode {
 	int first_def;
 	int ret_belongs_to;
 	int is_function_label;
+	int in_loop;
 	int idx;
 	char mode;
 } MnemNode;
