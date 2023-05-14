@@ -802,7 +802,7 @@ static char *list_nodearray(size_t n, Node **buffer)
 	return ret;
 }
 
-static Node *makeNode(Node *tmp)
+Node *makeNode(Node *tmp)
 {
 	Node *r = malloc(sizeof(Node));
 
@@ -1970,7 +1970,7 @@ Stack *init_stack(size_t n_alloc)
 	return tmp;
 }
 
-static ValPropPair *makeValPropPair(ValPropPair *tmp)
+ValPropPair *makeValPropPair(ValPropPair *tmp)
 {
 	ValPropPair *r = malloc(sizeof(ValPropPair));
 
@@ -2794,10 +2794,28 @@ static void interpret_binary_expr(Node *operator, Stack *opstack, Stack *valstac
 			interpret_binary_idx_expr(l_operand, r_operand, operator, opstack, valstack);
 			break;
 		case AST_FUNCTION_CALL:
-			switch (global_functions[l_operand->global_function_idx]->return_type)
+#define func (global_functions[l_operand->global_function_idx])
+			switch (func->return_type)
 			{
 				case TYPE_INT:
-					push(opstack, ast_inttype(0));
+					if (func->ret_array_dims) {
+						Node *array = NULL;
+						switch (func->return_stmt->retval->type)
+						{
+						case AST_ARRAY:
+							array = ast_arraytype(func->return_stmt->retval->array_size, func->return_stmt->retval->array_elems);
+							interpret_expr(array, &opstack, &valstack);
+							break;
+						case AST_IDENT:
+							array = ast_arraytype(func->return_stmt->retval->lvar_valproppair->array_size[0], NULL);
+							push(opstack, array);
+							break;
+						default:
+							c_error("Not implemented.", -1);
+						}
+					} else {
+						push(opstack, ast_inttype(0));
+					}
 					break;
 				case TYPE_STRING:
 					push(opstack, ast_stringtype("", -1, 0));
@@ -3106,7 +3124,7 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 					break;
 			}
 
-			if (expr->rettype != current_function->return_type) {
+			if (expr->rettype != current_function->return_type && !((expr->rettype == 5) && current_function->ret_array_dims)) {
 				char msg[128];
 				sprintf(&msg[0], "Type of return value does not match return value of function %s.", current_function->flabel);
 				c_error(msg, -1);

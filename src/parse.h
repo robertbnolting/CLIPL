@@ -223,6 +223,8 @@ typedef struct Node {
 
 void parser_init();
 int numPlaces();
+int find_function();
+ValPropPair *makeValPropPair();
 
 extern Node **global_functions;
 extern size_t global_function_count;
