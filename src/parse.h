@@ -225,6 +225,7 @@ void parser_init();
 int numPlaces();
 int find_function();
 ValPropPair *makeValPropPair();
+Node *makeNode();
 
 extern Node **global_functions;
 extern size_t global_function_count;
