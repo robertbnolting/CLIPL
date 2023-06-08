@@ -47,6 +47,7 @@ static int emit_array_assign();
 static int emit_offset_assign();
 static size_t *emit_string_assign();
 static size_t emit_string_arith_binop();
+static void emit_func_call();
 static void emit_syscall();
 
 static int do_array_arithmetic();
@@ -844,6 +845,13 @@ static int emit_offset_assign(int array_dims, int *array_size, size_t *array_len
 		}
 
 		return emit_offset_assign(array_dims, array_size, array_len, array_elems, loff, indexed_array);
+	} else if (array->type == AST_FUNCTION_CALL) {
+		emit_func_call(array);
+		int arr_reg = vregs_idx++;
+		for (int i = 0; i < array_size[0]+1; i++) {
+			emit("mov v%d [v%d-%d]", vregs_idx, arr_reg, i*8);
+			emit("mov qword [rsp+%d] v%d", loff-(i*8), vregs_idx++);
+		}
 	} else {
 		int total_size = 1;
 		for (int i = 0; i < array_dims; i++) {
@@ -934,7 +942,7 @@ static int **getArrayMembers(Node *array, size_t *n_members, int total_size, int
 			c_error("Not implemented.", -1);
 		}
 #undef pair
-	} else if (array->type == AST_FUNCTION_CALL) {
+	}/* else if (array->type == AST_FUNCTION_CALL) {
 #define ret (global_functions[array->global_function_idx]->return_stmt)
 		switch (ret->retval->type)
 		{
@@ -999,7 +1007,7 @@ static int **getArrayMembers(Node *array, size_t *n_members, int total_size, int
 			c_error("Not implemented.", -1);
 		}
 #undef ret
-	} else {
+	} */else {
 		switch (array->type)
 		{
 		case AST_INT:
@@ -1174,7 +1182,6 @@ static void emit_literal(Node *expr)
 			emit("mov dword [rsp+%d] %d", stack_offset, expr->slen);
 			emit("lea v%d [rsp+%d]", vregs_idx++, stack_offset);
 			break;
-			/*
 		case AST_ARRAY:
 		{
 			Node *var = malloc(sizeof(Node));
@@ -1189,12 +1196,14 @@ static void emit_literal(Node *expr)
 			var->lvar_valproppair = makeValPropPair(&(ValPropPair)
 				{"", 1, TYPE_ARRAY, .array_type=expr->array_member_type, .array_dims=expr->array_dims, .array_size=array_size});
 
-			var->lvar_valproppair->loff = total_size * 4;
+			stack_offset += (total_size+1) * 8;
+			var->lvar_valproppair->loff = stack_offset;
 
 			emit_array_assign(var, expr);
+
+			emit("lea v%d [rsp+%d]", vregs_idx, stack_offset);
 		}
 			break;
-			*/
 		default:
 			printf("Internal error.");
 	}
@@ -1238,6 +1247,7 @@ static void emit_load(int offset, char *base, int type)
 			}
 			break;
 		case TYPE_ARRAY:
+			emit("lea v%d [rsp+%d]", vregs_idx, offset);
 			break;
 		case TYPE_INT:
 		default:
@@ -1255,7 +1265,6 @@ static void emit_lvar(Node *n)
 	switch (n->type)
 	{
 		case AST_ARRAY:
-			break;
 		case AST_INT:
 		case AST_STRING:
 		default:
@@ -1633,6 +1642,7 @@ static void emit_func_call(Node *n)
 		switch (func->return_type)
 		{
 			case TYPE_INT:
+			case TYPE_ARRAY:
 				emit("mov v%d rax", vregs_idx);
 				break;
 			case TYPE_STRING:
@@ -1816,6 +1826,9 @@ static void emit_ret(Node *n)
 		case TYPE_STRING:
 			emit("mov rax v%d", vregs_idx-2);
 			emit("mov ebx [v%d]", vregs_idx-1);
+			break;
+		case TYPE_ARRAY:
+			emit("mov rax v%d", vregs_idx++);
 			break;
 	}
 }
