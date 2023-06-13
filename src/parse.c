@@ -2761,6 +2761,43 @@ static void interpret_binary_idx_expr(Node *l_operand, Node *r_operand, Node *op
 		case AST_ARRAY:
 			interpret_binary_array_expr(l_operand, r_operand, operator, opstack, valstack);
 			break;
+		case AST_IDX_ARRAY:
+		{
+			ValPropPair *ident_pair = r_operand->lvar_valproppair;
+
+			if (ident_pair->type != TYPE_INT) {
+				c_error("Operands of binary operation must be of the same type.", -1);
+			}
+			if (ident_pair->status == 0) {
+				c_error("Right operand of binary operation not initialized.", -1);
+			} else if (ident_pair->status == 2) {
+				c_warning("Right operand of binary operation may not be initialized.", -1);
+			}
+
+			int op = operator->type;
+			switch (op)
+			{
+				case AST_ADD:
+				case AST_SUB:
+				case AST_MUL:
+				case AST_DIV:
+				case AST_MOD:
+					push(opstack, ast_inttype(1));
+					break;
+				case AST_GT:
+				case AST_LT:
+				case AST_EQ:
+				case AST_NE:
+				case AST_GE:
+				case AST_LE:
+					push(opstack, ast_booltype(1));
+					break;
+			}
+
+			operator->result_type = TYPE_INT;
+		}
+
+		break;
 	}
 
 	/*

@@ -318,10 +318,6 @@ MnemNode *makeMnemNode(char *mnem)
 	int idx = -1;
 	int ret_belongs_to = -1;
 
-	if (type >= JE && type <= GOTO) {
-		in_loop--;
-	}
-
 	if (!type) {
 		char *mnem_p = mnem;
 		char buf[10] = {0};
@@ -385,6 +381,8 @@ MnemNode *makeMnemNode(char *mnem)
 		} else if (!strcmp(&mnem_p[off], "syscall")) {
 			type = SYSCALL;
 			r->in_loop = in_loop;
+		} else if (!strncmp(mnem_p, "Loop", 4)) {
+			in_loop--;
 		} else {
 			idx = realRegToIdx(&mnem_p[off], &mode);
 			if (idx >= 0) {
@@ -1319,34 +1317,35 @@ static void emit_int_arith_binop(Node *expr)
 	switch (expr->type)
 	{
 		case AST_ADD:
-			emit_expr(expr->right);
-			right_idx = vregs_idx++;
 			emit_expr(expr->left);
-			left_idx = vregs_idx;
+			left_idx = vregs_idx++;
+			emit_expr(expr->right);
+			right_idx = vregs_idx;
 
-			emit("add vd%d vd%d", left_idx, right_idx);
+			emit("add vd%d vd%d", right_idx, left_idx);
 			break;
 		case AST_SUB:
-			emit_expr(expr->right);
-			right_idx = vregs_idx++;
 			emit_expr(expr->left);
-			left_idx = vregs_idx;
+			left_idx = vregs_idx++;
+			emit_expr(expr->right);
+			right_idx = vregs_idx;
 
 			emit("sub vd%d vd%d", left_idx, right_idx);
+			emit("mov vd%d vd%d", right_idx, left_idx);
 			break;
 		case AST_MUL:
-			emit_expr(expr->right);
-			right_idx = vregs_idx++;
 			emit_expr(expr->left);
-			left_idx = vregs_idx;
+			left_idx = vregs_idx++;
+			emit_expr(expr->right);
+			right_idx = vregs_idx;
 
-			emit("imul vd%d vd%d", left_idx, right_idx);
+			emit("imul vd%d vd%d", right_idx, left_idx);
 			break;
 		case AST_DIV:
-			emit_expr(expr->right);
-			right_idx = vregs_idx++;
 			emit_expr(expr->left);
-			left_idx = vregs_idx;
+			left_idx = vregs_idx++;
+			emit_expr(expr->right);
+			right_idx = vregs_idx;
 
 			emit("mov rdx 0");
 			emit("mov rax v%d", left_idx);
@@ -1354,12 +1353,13 @@ static void emit_int_arith_binop(Node *expr)
 			emit("div v%d", right_idx);
 
 			emit("mov v%d rax", left_idx);
+			emit("mov vd%d vd%d", right_idx, left_idx);
 			break;
 		case AST_MOD:
-			emit_expr(expr->right);
-			right_idx = vregs_idx++;
 			emit_expr(expr->left);
-			left_idx = vregs_idx;
+			left_idx = vregs_idx++;
+			emit_expr(expr->right);
+			right_idx = vregs_idx;
 
 			emit("mov rdx 0");
 			emit("mov rax v%d", left_idx);
@@ -1367,6 +1367,7 @@ static void emit_int_arith_binop(Node *expr)
 			emit("div v%d", right_idx);
 
 			emit("mov v%d rdx", left_idx);
+			emit("mov vd%d vd%d", right_idx, left_idx);
 			break;
 	}
 }
@@ -1681,7 +1682,7 @@ static void emit_if(Node *n)
 static void emit_while(Node *n)
 {
 	char *cond_label = makeLabel(0);
-	char *body_label = makeLabel(0);
+	char *body_label = makeLabel(1);
 
 	emit("jmp %s", cond_label);
 
