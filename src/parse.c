@@ -1824,7 +1824,9 @@ static void thread_expression(Node *expr)
 		case AST_IDENT:
 		case AST_INT:
 		case AST_FLOAT:
-		case AST_STRING: case AST_BOOL: case AST_FIELD_ACCESS:
+		case AST_STRING:
+		case AST_BOOL:
+		case AST_FIELD_ACCESS:
 		case AST_RECORD_DEF:
 		case AST_DECLARATION:
 			last_node->successor = expr;
@@ -1835,6 +1837,7 @@ static void thread_expression(Node *expr)
 			last_node = expr;
 			break;
 		case AST_IDX_ARRAY:
+			thread_block(expr->index_values, expr->ndim_index);
 			last_node->successor = expr;
 			last_node = expr;
 			break;
@@ -2916,7 +2919,11 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 {
 	if (expr == NULL || expr->type == CFG_JOIN_NODE) {
 		return expr;
+	} else if (expr->type == CFG_AUXILIARY_NODE) {
+		push(*opstack, expr);
+		return expr;
 	}
+
 	switch (expr->type)
 	{
 		case AST_IDENT:
@@ -2993,7 +3000,7 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 			}
 
 			for (int i = 0; i < expr->ndim_index; i++) {
-				interpret_expr(expr->index_values[i], opstack, valstack);
+				//interpret_expr(expr->index_values[i], opstack, valstack);
 				pop(*opstack);
 			}
 
@@ -3155,7 +3162,9 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 				case AST_LE:
 					expr->rettype = retval->result_type;
 					break;
-
+				case CFG_AUXILIARY_NODE:
+					expr->rettype = TYPE_VOID;
+					break;
 				default:
 					expr->rettype = retval->type;
 					break;

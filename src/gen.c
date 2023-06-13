@@ -1817,20 +1817,22 @@ cont_nostring:
 
 static void emit_ret(Node *n)
 {
-	emit_expr(n->retval);
+	if (n->retval) {
+		emit_expr(n->retval);
 
-	switch (n->rettype)
-	{
-		case TYPE_INT:
-			emit("mov rax v%d", vregs_idx++);
-			break;
-		case TYPE_STRING:
-			emit("mov rax v%d", vregs_idx-2);
-			emit("mov ebx [v%d]", vregs_idx-1);
-			break;
-		case TYPE_ARRAY:
-			emit("mov rax v%d", vregs_idx++);
-			break;
+		switch (n->rettype)
+		{
+			case TYPE_INT:
+				emit("mov rax v%d", vregs_idx++);
+				break;
+			case TYPE_STRING:
+				emit("mov rax v%d", vregs_idx-2);
+				emit("mov ebx [v%d]", vregs_idx-1);
+				break;
+			case TYPE_ARRAY:
+				emit("mov rax v%d", vregs_idx++);
+				break;
+		}
 	}
 }
 
