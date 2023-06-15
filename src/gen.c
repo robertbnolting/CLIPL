@@ -687,6 +687,7 @@ static void emit_func_prologue(Node *func)
 
 			break;
 		case TYPE_INT:
+		case TYPE_BOOL:
 			stack_offset += 8;
 
 			emit("mov vd%d [rbp+%d]", vregs_idx, 8 * param_offset++);
@@ -694,6 +695,42 @@ static void emit_func_prologue(Node *func)
 
 			func->fnparams[i]->lvar_valproppair->loff = stack_offset;
 
+			break;
+		case TYPE_ARRAY:
+		{
+			stack_offset += func->fnparams[i]->varray_size[0]*8;
+
+			emit("mov v%d [rbp+%d]", vregs_idx, 8 * param_offset++);
+			emit("mov v%d [v%d]", vregs_idx+1, vregs_idx);
+
+			int array_address = vregs_idx++;
+			int array_size = vregs_idx++;
+			int acc = vregs_idx++;
+			int array_element = vregs_idx;
+			char *loop = makeLabel(1);
+
+			emit("lea v%d [v%d*8]", array_size, array_size);
+			emit("add v%d v%d", array_address, array_size);
+
+			emit("mov vd%d 0", acc);
+			emit("add rsp %d", stack_offset);
+
+			emit_noindent("%s:", loop);
+			emit("sub v%d v%d", array_address, acc);
+			emit("mov vd%d [v%d]", array_element, array_address);
+			emit("add v%d v%d", array_address, acc);
+			emit("\n");
+			emit("sub rsp v%d", acc);
+			emit("mov [rsp] v%d", array_element);
+			emit("add rsp v%d", acc);
+			emit("add v%d 8", acc);
+			emit("\n");
+			emit("cmp v%d v%d", array_size, acc);
+			emit("jne %s", loop);
+			emit("sub rsp %d", stack_offset);
+
+			func->fnparams[i]->lvar_valproppair->loff = stack_offset;
+		}
 			break;
 		default:
 			c_error("Not implemented.", -1);
@@ -704,7 +741,6 @@ static void emit_func_prologue(Node *func)
 	emit_block(func->fnbody, func->n_stmts);
 
 	ins_array = realloc(ins_array, sizeof(MnemNode*) * (ins_array_sz+1));
-
 	memmove(&ins_array[end_prologue+1], &ins_array[end_prologue], sizeof(MnemNode*) * (ins_array_sz-end_prologue));
 
 	ins_array_sz++;
@@ -1586,6 +1622,7 @@ static void emit_func_call(Node *n)
 			{
 			case AST_INT:
 			case AST_STRING:
+			case AST_ARRAY:
 				arg_type = n->callargs[i]->type;
 				break;
 			case AST_IDENT:
@@ -1613,6 +1650,20 @@ static void emit_func_call(Node *n)
 				emit("push v%d", vregs_idx++);
 				real_params++;
 				break;
+			case AST_ARRAY:
+				switch (n->callargs[i]->type)
+				{
+				case AST_ARRAY:
+					emit("sub v%d %d", vregs_idx, n->callargs[i]->array_size * 8);
+					break;
+				case AST_IDENT:
+					emit("sub v%d %d", vregs_idx, n->callargs[i]->lvar_valproppair->array_size[0] * 8);
+					break;
+				default:
+					c_error("Not implemented.", -1);
+				}
+				emit("push v%d", vregs_idx++);
+				break;
 			case AST_STRING:
 			{
 				emit("push v%d", vregs_idx-2);
@@ -1627,7 +1678,6 @@ static void emit_func_call(Node *n)
 				real_params += 2;
 			}
 				break;
-
 			default:
 				c_error("Not implemented.", -1);
 			}
