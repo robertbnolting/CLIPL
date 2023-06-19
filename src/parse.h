@@ -87,6 +87,7 @@ typedef struct ValPropPair {
 			struct Node **array_elems;
 			// used in generation
 			size_t array_len;
+			int is_array_reference;
 		};
 		Vector record_vec;
 	};

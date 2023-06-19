@@ -1930,11 +1930,13 @@ static void thread_expression(Node *expr)
 
 			break;
 		case AST_FOR_STMT:
+			thread_expression(expr->for_enum);
+
 			last_node->successor = expr;
 
 			aux = cfg_aux_node();
 			last_node = aux;
-			
+
 			thread_block(expr->for_body, expr->n_for_stmts);
 
 			expr->for_loop_successor = aux->successor;
@@ -2303,7 +2305,7 @@ static void interpret_assignment_expr(Node *expr, Stack *opstack, Stack *valstac
 				ValPropPair *ident_pair = rhs->lvar_valproppair;
 				if (!ident_pair) {
 					char *msg = malloc(128);
-					sprintf(msg, "No variable with name %s found.", rhs->name);
+					sprintf(msg, "No variable with name %s has been declared.", rhs->name);
 					c_error(msg, -1);
 				}
 				if (ident_pair->status == 0) {
@@ -2464,7 +2466,7 @@ static void interpret_declaration_expr(Node *expr, Stack *opstack, Stack *valsta
 
 	if (expr->v_array_dimensions) {
 		pair = makeValPropPair(&(ValPropPair)
-			{expr->vlabel, 0, TYPE_ARRAY, .array_type=expr->vtype, .array_dims=expr->v_array_dimensions, .array_size=expr->varray_size}
+			{expr->vlabel, 0, TYPE_ARRAY, .array_type=expr->vtype, .array_dims=expr->v_array_dimensions, .array_size=expr->varray_size, .is_array_reference=0}
 		);
 	} else {
 		pair = makeValPropPair(&(ValPropPair){expr->vlabel, 0, expr->vtype});
@@ -2878,14 +2880,17 @@ static void interpret_func_def(Node *n, Stack *opstack, Stack *valstack)
 
 		interpret_declaration_expr(param, opstack, valstack);
 		((ValPropPair*) *valstack->top)->status = 1;
+
+		if (param->lvar_valproppair->type == TYPE_ARRAY) {
+			param->lvar_valproppair->is_array_reference = 1;
+		}
 	}
 }
 
 static void interpret_func_call(Node *n, Stack **opstack, Stack **valstack)
 {
-	Node *arg;
 	for (int i = 0; i < n->n_args; i++) {
-		arg = pop(*opstack);
+		pop(*opstack);
 		switch (n->callargs[i]->type)
 		{
 			case AST_ASSIGN:
@@ -2931,7 +2936,7 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 			ValPropPair *pair = searchValueStack(*valstack, expr->name);
 			if (!pair) {
 				char *msg = malloc(128);
-				sprintf(msg, "No variable with name %s found.", expr->name);
+				sprintf(msg, "No variable with name %s has been declared.", expr->name);
 				c_error(msg, -1);
 			}
 			expr->lvar_valproppair = pair;
@@ -2976,7 +2981,7 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 			ValPropPair *pair = searchValueStack(*valstack, expr->ia_label);
 			if (!pair) {
 				char *msg = malloc(128);
-				sprintf(msg, "No variable with name %s found.", expr->name);
+				sprintf(msg, "No variable with name %s has been declared.", expr->name);
 				c_error(msg, -1);
 			}
 			if (pair->type != TYPE_ARRAY) {
@@ -3008,13 +3013,11 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 			// if (pair->array_dims > expr->ndim_index)
 
 			// TODO: resolve index_values[i] to something other than just int
-			/*
 			for (int i = 0; i < expr->ndim_index; i++) {
 				if (expr->index_values[i]->ival > pair->array_size[i]-1) {
 					c_error("Array index can't be bigger than array size.", -1);
 				}
 			}
-			*/
 
 			int diff = pair->array_dims - expr->ndim_index;
 			if (diff > 0) {
@@ -3125,7 +3128,6 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 			interpret_expr(expr->successor, opstack, valstack);
 			break;
 		case AST_FOR_STMT:
-			interpret_expr(expr->for_enum, opstack, valstack);
 			interpret_expr(expr->for_iterator, opstack, valstack);
 			expr->for_iterator->lvar_valproppair->status = 1;
 			interpret_expr(expr->for_loop_successor, opstack, valstack);

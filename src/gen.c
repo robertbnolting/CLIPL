@@ -47,7 +47,7 @@ static int emit_array_assign();
 static int emit_offset_assign();
 static size_t *emit_string_assign();
 static size_t emit_string_arith_binop();
-static void emit_func_call();
+static Node *emit_func_call();
 static void emit_syscall();
 
 static int do_array_arithmetic();
@@ -121,6 +121,22 @@ static void getStringLens(Node *n, size_t *pair)
 			pair[1] += saved_pair[1];
 		}
 			break;
+		default:
+			c_error("Not implemented.", -1);
+			break;
+	}
+}
+
+static int *getReturnArraySize(Node *n)
+{
+	switch (n->type)
+	{
+		case AST_IDENT:
+			return n->lvar_valproppair->array_size;
+		case AST_ARRAY:
+			return getArraySizes(n, n->array_dims);
+		case AST_FUNCTION_CALL:
+			return getReturnArraySize(global_functions[n->global_function_idx]->return_stmt->retval);
 		default:
 			c_error("Not implemented.", -1);
 			break;
@@ -698,8 +714,10 @@ static void emit_func_prologue(Node *func)
 			break;
 		case TYPE_ARRAY:
 		{
-			stack_offset += func->fnparams[i]->varray_size[0]*8;
+			//stack_offset += (func->fnparams[i]->varray_size[0]+1) * 8;
+			stack_offset += 8;
 
+			/*
 			emit("mov v%d [rbp+%d]", vregs_idx, 8 * param_offset++);
 			emit("mov v%d [v%d]", vregs_idx+1, vregs_idx);
 
@@ -713,6 +731,7 @@ static void emit_func_prologue(Node *func)
 			emit("add v%d v%d", array_address, array_size);
 
 			emit("mov vd%d 0", acc);
+			emit("add v%d 8", array_size);
 			emit("add rsp %d", stack_offset);
 
 			emit_noindent("%s:", loop);
@@ -728,6 +747,10 @@ static void emit_func_prologue(Node *func)
 			emit("cmp v%d v%d", array_size, acc);
 			emit("jne %s", loop);
 			emit("sub rsp %d", stack_offset);
+			*/
+
+			emit("mov v%d [rbp+%d]", vregs_idx, 8 * param_offset++);
+			emit("mov [rsp+%d] v%d", stack_offset, vregs_idx++);
 
 			func->fnparams[i]->lvar_valproppair->loff = stack_offset;
 		}
@@ -1153,7 +1176,7 @@ static int do_array_arithmetic(Node *expr, Node *var)
 
 			emit("add rsp v%d", offset_reg);
 
-			pair->array_elems = realloc(pair->array_elems, sizeof(Node *) * (pair->array_len+1));
+
 			pair->array_elems[pair->array_len++] = expr->right;
 
 			emit("inc qword [rsp+%d]", pair->loff - (pair->array_size[0] * 8));
@@ -1180,8 +1203,7 @@ static int *getArraySizes(Node *array, int dims)
 	if (dims == 0) {
 		return NULL;
 	} else {
-		sizes[0] = array->array_size;
-	}
+		sizes[0] = array->array_size; }
 	
 	int *next_sizes = getArraySizes(array->array_elems[0], dims-1);
 
@@ -1235,11 +1257,48 @@ static void emit_literal(Node *expr)
 
 			emit_array_assign(var, expr);
 
-			emit("lea v%d [rsp+%d]", vregs_idx, stack_offset);
+			emit("mov v%d [rsp+%d]", vregs_idx, stack_offset);
 		}
 			break;
 		default:
 			printf("Internal error.");
+	}
+}
+
+static void emit_array_arg(Node *n)
+{
+	switch (n->type)
+	{
+	case AST_ARRAY:
+	{
+		Node *var = malloc(sizeof(Node));
+		int *array_size = getArraySizes(n, n->array_dims);
+
+		int total_size = 1;
+		for (int i = 0; i < n->array_dims; i++) {
+			total_size *= array_size[i];
+		}
+
+		var->type = AST_IDENT;
+		var->lvar_valproppair = makeValPropPair(&(ValPropPair)
+			{"", 1, TYPE_ARRAY, .array_type=n->array_member_type, .array_dims=n->array_dims, .array_size=array_size});
+
+		stack_offset += (total_size+1) * 8;
+		var->lvar_valproppair->loff = stack_offset;
+
+		emit_array_assign(var, n);
+
+		emit("lea v%d [rsp+%d]", vregs_idx, stack_offset);
+	}
+		break;
+	case AST_IDENT:
+		emit("lea v%d [rsp+%d]", vregs_idx, n->lvar_valproppair->loff);
+		break;
+	case AST_FUNCTION_CALL:
+		emit_func_call(n);
+		break;
+	default:
+		c_error("Not implemented.", -1);
 	}
 }
 
@@ -1280,9 +1339,6 @@ static void emit_load(int offset, char *base, int type)
 				emit("lea v%d [%s+%d]", vregs_idx++, base, offset);
 			}
 			break;
-		case TYPE_ARRAY:
-			emit("lea v%d [rsp+%d]", vregs_idx, offset);
-			break;
 		case TYPE_INT:
 		default:
 			if (offset < 0) {
@@ -1296,14 +1352,17 @@ static void emit_load(int offset, char *base, int type)
 
 static void emit_lvar(Node *n)
 {
-	switch (n->type)
+	switch (n->lvar_valproppair->type)
 	{
 		case AST_ARRAY:
+			emit("lea v%d [rsp+%d]", vregs_idx, n->lvar_valproppair->loff);
+			break;
 		case AST_INT:
 		case AST_STRING:
-		default:
 			emit_load(n->lvar_valproppair->loff, "rsp", n->lvar_valproppair->type);
 			break;
+		default:
+			c_error("Not implemented.", -1);
 	}
 }
 
@@ -1604,7 +1663,7 @@ static void op(Node *expr)
 	}
 }
 
-static void emit_func_call(Node *n)
+static Node *emit_func_call(Node *n)
 {
 	int idx = n->global_function_idx;
 
@@ -1616,8 +1675,6 @@ static void emit_func_call(Node *n)
 #define func (global_functions[idx])
 		int arg_type;
 		for (int i = 0; i < n->n_args; i++) {
-			emit_expr(n->callargs[i]);
-
 			switch (n->callargs[i]->type)
 			{
 			case AST_INT:
@@ -1641,28 +1698,28 @@ static void emit_func_call(Node *n)
 			case AST_LE:
 				arg_type = n->callargs[i]->result_type;
 				break;
+			case AST_FUNCTION_CALL:
+				if(global_functions[n->callargs[i]->global_function_idx]->ret_array_dims) {
+					arg_type = AST_ARRAY;
+				} else {
+					arg_type = global_functions[n->callargs[i]->global_function_idx]->return_type;
+				}
+				break;
+			}
+
+			if (arg_type == AST_ARRAY) {
+				emit_array_arg(n->callargs[i]);
+			} else {
+				emit_expr(n->callargs[i]);
 			}
 
 			// TODO: propagate string values (valproppair) from callargs to func params
 			switch (arg_type)
 			{
 			case AST_INT:
+			case AST_ARRAY:
 				emit("push v%d", vregs_idx++);
 				real_params++;
-				break;
-			case AST_ARRAY:
-				switch (n->callargs[i]->type)
-				{
-				case AST_ARRAY:
-					emit("sub v%d %d", vregs_idx, n->callargs[i]->array_size * 8);
-					break;
-				case AST_IDENT:
-					emit("sub v%d %d", vregs_idx, n->callargs[i]->lvar_valproppair->array_size[0] * 8);
-					break;
-				default:
-					c_error("Not implemented.", -1);
-				}
-				emit("push v%d", vregs_idx++);
 				break;
 			case AST_STRING:
 			{
@@ -1749,6 +1806,7 @@ static void emit_for(Node *n)
 {
 #define for_enum (n->for_enum)
 #define for_it (n->for_iterator)
+
 	int saved_stack = stack_offset;
 	int enum_off;
 
@@ -1812,6 +1870,12 @@ static void emit_for(Node *n)
 
 		size_t array_len = 0;
 		emit_offset_assign(for_enum->array_dims, sizes, &array_len, &for_enum->array_elems, stack_offset, for_enum);
+	} else if (for_enum->type == AST_FUNCTION_CALL) {
+		emit_func_call(for_enum);
+		stack_offset += 8;
+		emit("mov [rsp+%d] v%d", stack_offset, vregs_idx++);
+		enum_off = stack_offset;
+		sizes = getReturnArraySize(for_enum);
 	}
 cont_nostring:
 
@@ -1819,12 +1883,26 @@ cont_nostring:
 	int acc = vregs_idx++;
 	int len = vregs_idx++;
 	int idx = vregs_idx++;
+	int array_address = vregs_idx++;
 
 	emit_declaration(for_it);
 
 	emit("mov vd%d 0", acc);
 	emit("mov vd%d 0", idx);
 	emit("mov vd%d %d", len, sizes[0]);
+
+	if (for_enum->lvar_valproppair) {
+		if (for_enum->lvar_valproppair->is_array_reference) {
+			emit("mov v%d [rsp+%d]", array_address, enum_off);
+		} else {
+			emit("lea v%d [rsp+%d]", array_address, enum_off);
+		}
+	} else if (for_enum->type == AST_FUNCTION_CALL) {
+		emit("mov v%d [rsp+%d]", array_address, enum_off);
+	} else {
+		emit("lea v%d [rsp+%d]", array_address, enum_off);
+	}
+
 	emit_noindent("%s:", loop_label);
 
 	int sizeacc = 1;
@@ -1836,9 +1914,9 @@ cont_nostring:
 	emit("imul vd%d %d", idx, sizeacc);
 
 	if (!for_it->v_array_dimensions) {
-		emit("sub rsp v%d", idx);
-		emit("mov vd%d [rsp+%d]", vregs_idx, enum_off);
-		emit("add rsp v%d", idx);
+		emit("sub v%d v%d", array_address, idx);
+		emit("mov vd%d [v%d]", vregs_idx, array_address);
+		emit("add v%d v%d", array_address, idx);
 		emit_store_offset(for_it->lvar_valproppair->loff, for_it->vtype);
 	} else {
 		int it_sizes = 1;
