@@ -714,40 +714,7 @@ static void emit_func_prologue(Node *func)
 			break;
 		case TYPE_ARRAY:
 		{
-			//stack_offset += (func->fnparams[i]->varray_size[0]+1) * 8;
 			stack_offset += 8;
-
-			/*
-			emit("mov v%d [rbp+%d]", vregs_idx, 8 * param_offset++);
-			emit("mov v%d [v%d]", vregs_idx+1, vregs_idx);
-
-			int array_address = vregs_idx++;
-			int array_size = vregs_idx++;
-			int acc = vregs_idx++;
-			int array_element = vregs_idx;
-			char *loop = makeLabel(1);
-
-			emit("lea v%d [v%d*8]", array_size, array_size);
-			emit("add v%d v%d", array_address, array_size);
-
-			emit("mov vd%d 0", acc);
-			emit("add v%d 8", array_size);
-			emit("add rsp %d", stack_offset);
-
-			emit_noindent("%s:", loop);
-			emit("sub v%d v%d", array_address, acc);
-			emit("mov vd%d [v%d]", array_element, array_address);
-			emit("add v%d v%d", array_address, acc);
-			emit("\n");
-			emit("sub rsp v%d", acc);
-			emit("mov [rsp] v%d", array_element);
-			emit("add rsp v%d", acc);
-			emit("add v%d 8", acc);
-			emit("\n");
-			emit("cmp v%d v%d", array_size, acc);
-			emit("jne %s", loop);
-			emit("sub rsp %d", stack_offset);
-			*/
 
 			emit("mov v%d [rbp+%d]", vregs_idx, 8 * param_offset++);
 			emit("mov [rsp+%d] v%d", stack_offset, vregs_idx++);
@@ -999,83 +966,12 @@ static int **getArrayMembers(Node *array, size_t *n_members, int total_size, int
 			c_error("Not implemented.", -1);
 		}
 #undef pair
-	}/* else if (array->type == AST_FUNCTION_CALL) {
-#define ret (global_functions[array->global_function_idx]->return_stmt)
-		switch (ret->retval->type)
-		{
-		case AST_ARRAY:
-			array_size = ret->retval->array_size;
-			array_elems = ret->retval->array_elems;
-			array_dims = ret->retval->array_dims;
-			break;
-		case AST_IDENT:
-			array_size = ret->retval->lvar_valproppair->array_size[0];
-			array_elems = ret->retval->lvar_valproppair->array_elems;
-			array_dims = ret->retval->lvar_valproppair->array_dims;
-			break;
-		case AST_ADD:
-		case AST_SUB:
-		case AST_MUL:
-		case AST_DIV:
-		{
-			int l_size;
-			int r_size;
-			Node **l_elems;
-			Node **r_elems;
-			int dims;
-
-			switch (ret->retval->left->type)
-			{
-			case AST_ARRAY:
-				l_size = ret->retval->left->array_size;
-				l_elems = ret->retval->left->array_elems;
-				dims = ret->retval->left->array_dims;
-				break;
-			case AST_IDENT:
-				l_size = ret->retval->left->lvar_valproppair->array_size[0];
-				l_elems = ret->retval->left->lvar_valproppair->array_elems;
-				dims = ret->retval->left->lvar_valproppair->array_dims;
-				break;
-			default:
-				c_error("Not implemented.", -1);
-			}
-
-			switch (ret->retval->left->type)
-			{
-			case AST_ARRAY:
-				r_size = ret->retval->right->array_size;
-				r_elems = ret->retval->right->array_elems;
-				break;
-			case AST_IDENT:
-				r_size = ret->retval->right->lvar_valproppair->array_size[0];
-				r_elems = ret->retval->right->lvar_valproppair->array_elems;
-				break;
-			default:
-				c_error("Not implemented.", -1);
-			}
-
-			array_size = l_size + r_size;
-			array_dims = dims;
-			array_elems = realloc(l_elems, r_size * sizeof(Node *));
-			memcpy(&array_elems[l_size], r_elems, r_size * sizeof(Node *));
-		}
-			break;
-		default:
-			c_error("Not implemented.", -1);
-		}
-#undef ret
-	} */else {
-		switch (array->type)
-		{
-		case AST_INT:
-			array_size = 1;
-			array_elems = malloc(sizeof(Node*));
-			array_elems[0] = array;
-			break;
-		default:
-			c_error("Not implemented.", -1);
-			break;
-		}
+	} else if (array->type == AST_INT) {
+		array_size = 1;
+		array_elems = malloc(sizeof(Node*));
+		array_elems[0] = array;
+	} else {
+		c_error("Not implemented.", -1);
 	}
 
 	if (array_dims == 1) {
@@ -1257,7 +1153,7 @@ static void emit_literal(Node *expr)
 
 			emit_array_assign(var, expr);
 
-			emit("mov v%d [rsp+%d]", vregs_idx, stack_offset);
+			emit("lea v%d [rsp+%d]", vregs_idx, stack_offset);
 		}
 			break;
 		default:
@@ -2206,12 +2102,7 @@ static InterferenceNode **lva()
 					if (prev_live_del_sz) {
 						live_range[i] = liverange_subtract(live_range[i], prev_live_del, &live_sz, prev_live_del_sz);
 
-						/*
-						if (live_sz >= prev_live_del_sz) {
-							live_sz_array[i] = live_sz - prev_live_del_sz;
-						} else {*/
-							live_sz_array[i] = live_sz;
-						//}
+						live_sz_array[i] = live_sz;
 
 						free(prev_live_del);
 						prev_live_del_sz = 0;
@@ -2321,30 +2212,9 @@ static InterferenceNode **lva()
 #undef is_sc_arg
 #undef idx
 
-			//char **jump_tos = NULL;
-			//size_t n_jump_tos = 0;
-
 			for (int j = syscall_list[i]; j >= 0; j--) {
 				if (i != syscall_list_sz-1 && j == syscall_list[i+1])
 					break;
-
-				/*
-#define ins	(ins_array[j])
-				if (ins->type >= JE && ins->type <= GOTO) {
-					jump_tos = realloc(jump_tos, (n_jump_tos+1) * sizeof(char *));
-					jump_tos[n_jump_tos++] = ins->left->mnem;
-				} else if (ins->type == LABEL) {
-					int k;
-					for (k = 0; k < n_jump_tos; k++) {
-						if (!strcmp(jump_tos[k], ins->mnem)) {
-							break;
-						}
-					}
-
-					if (k == n_jump_tos) {	// syscall instruction is inside of a loop
-					}
-				}
-				*/
 
 				live_range[j] = liverange_subtract(live_range[j], &unused_arg_regs[0], &live_sz_array[j], unused_arg_regs_sz);
 			}
