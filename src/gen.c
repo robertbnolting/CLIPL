@@ -747,6 +747,7 @@ static void emit_func_prologue(Node *func)
 	ins_array[end_prologue] = sub;
 
 	emit("\n");
+	emit_noindent("ret_%d:", current_func);
 	emit("add rsp %d", stack_offset);
 	emit("pop rbp");
 	func->end_body = ins_array_sz;
@@ -1227,21 +1228,12 @@ static void emit_load(int offset, char *base, int type)
 	switch (type)
 	{
 		case TYPE_STRING:
-			if (offset < 0) {
-				emit("mov v%d [%s-%d]", vregs_idx++, base, -(offset-8));
-				emit("lea v%d [%s-%d]", vregs_idx++, base, -offset);
-			} else {
-				emit("mov v%d [%s+%d]", vregs_idx++, base, offset-8);
-				emit("lea v%d [%s+%d]", vregs_idx++, base, offset);
-			}
+			emit("mov v%d [%s+%d]", vregs_idx++, base, offset-4);
+			emit("lea v%d [%s+%d]", vregs_idx++, base, offset);
 			break;
 		case TYPE_INT:
 		default:
-			if (offset < 0) {
-				emit("mov v%d [%s-%d]", vregs_idx, base, -offset);
-			} else {
-				emit("mov vd%d [%s+%d]", vregs_idx, base, offset);
-			}
+			emit("mov vd%d [%s+%d]", vregs_idx, base, offset);
 			break;
 	}
 }
@@ -1858,6 +1850,8 @@ static void emit_ret(Node *n)
 				break;
 		}
 	}
+
+	emit("jmp ret_%d", current_func);
 }
 
 static void emit_expr(Node *expr)
