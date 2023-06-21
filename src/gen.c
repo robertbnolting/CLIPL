@@ -691,13 +691,13 @@ static void emit_func_prologue(Node *func)
 		switch (func->fnparams[i]->lvar_valproppair->type)
 		{
 		case TYPE_STRING:
-			stack_offset += 12;
+			stack_offset += 16;
 
 			emit("mov v%d [rbp+%d]", vregs_idx, 8 * param_offset++);
 			emit("mov v%d [v%d]", vregs_idx, vregs_idx);
 			emit("mov [rsp+%d] vd%d", stack_offset, vregs_idx++);
 			emit("mov v%d [rbp+%d]", vregs_idx, 8 * param_offset++);
-			emit("mov [rsp+%d] v%d", stack_offset-4, vregs_idx++);
+			emit("mov [rsp+%d] v%d", stack_offset-8, vregs_idx++);
 
 			func->fnparams[i]->lvar_valproppair->loff = stack_offset;
 
@@ -777,7 +777,7 @@ static void emit_store_offset(int offset, int type)
 			emit("mov [rsp+%d] vd%d", offset, vregs_idx++);
 			break;
 		case TYPE_STRING:
-			emit("mov [rsp+%d] v%d", offset-4, vregs_idx-2);
+			emit("mov [rsp+%d] v%d", offset-8, vregs_idx-2);
 			emit("mov vd%d [v%d]", vregs_idx-1, vregs_idx-1);
 			emit("mov [rsp+%d] vd%d", offset, vregs_idx-1);
 			emit("\n");
@@ -803,7 +803,7 @@ static void emit_store(Node *n)
 					emit_store_offset(stack_offset, TYPE_INT);
 					break;
 				case TYPE_STRING:
-					stack_offset += 12;
+					stack_offset += 16;
 					n->lvar_valproppair->loff = stack_offset;
 
 					emit_store_offset(stack_offset, TYPE_STRING);
@@ -1228,7 +1228,7 @@ static void emit_load(int offset, char *base, int type)
 	switch (type)
 	{
 		case TYPE_STRING:
-			emit("mov v%d [%s+%d]", vregs_idx++, base, offset-4);
+			emit("mov v%d [%s+%d]", vregs_idx++, base, offset-8);
 			emit("lea v%d [%s+%d]", vregs_idx++, base, offset);
 			break;
 		case TYPE_INT:
@@ -1259,7 +1259,7 @@ static void emit_declaration(Node *n)
 	switch (n->lvar_valproppair->type)
 	{
 		case TYPE_STRING:
-			stack_offset += 12;
+			stack_offset += 16;
 			n->lvar_valproppair->loff = stack_offset;
 
 			break;
@@ -1726,13 +1726,12 @@ static void emit_for(Node *n)
 
 		emit("mov vb%d [v%d+v%d]", vregs_idx, string, acc);
 
-		stack_offset += 2;
+		stack_offset += 10;
 		emit("mov [rsp+%d] vb%d", stack_offset, vregs_idx);
-		emit("mov byte [rsp+%d] 0", stack_offset-1);
+		emit("mov byte [rsp+%d] 0", stack_offset+1);
 		emit("lea v%d [rsp+%d]", vregs_idx++, stack_offset);
-		stack_offset += 4;
-		emit("mov dword [rsp+%d] 1", stack_offset);
-		emit("lea v%d [rsp+%d]", vregs_idx++, stack_offset);
+		emit("mov qword [rsp+%d] 1", stack_offset+2);
+		emit("lea v%d [rsp+%d]", vregs_idx++, stack_offset+2);
 
 		emit_store_offset(for_it->lvar_valproppair->loff, for_it->vtype);
 
@@ -2184,34 +2183,63 @@ static InterferenceNode **lva()
 #undef func
 
 	for (int i = 0; i < syscall_list_sz; i++) {
-		if (!ins_array[syscall_list[i]]->in_loop) {
-			int unused_arg_regs[9];
-			size_t unused_arg_regs_sz = 0;
+		int unused_arg_regs[9];
+		size_t unused_arg_regs_sz = 0;
 
 #define idx 		(syscall_list[i+1]+1) // last instruction before the next syscall
 #define is_sc_arg(x)	( (x==0) || (x==5) || (x==4) || (x==3) || (x==8) || (x==6) || (x==7) || (x==2) || (x==9) )
-			if (i == syscall_list_sz-1) {
-				for (int j = 0; j < live_sz_array[0]; j++) {
-					if (is_sc_arg(live_range[0][j])) {
-						unused_arg_regs[unused_arg_regs_sz++] = live_range[0][j];
-					}
-				}
-			} else {
-				for (int j = 0; j < live_sz_array[idx]; j++) {
-					if (is_sc_arg(live_range[idx][j])) {
-						unused_arg_regs[unused_arg_regs_sz++] = live_range[idx][j];
-					}
+		if (i == syscall_list_sz-1) {
+			for (int j = 0; j < live_sz_array[0]; j++) {
+				if (is_sc_arg(live_range[0][j])) {
+					unused_arg_regs[unused_arg_regs_sz++] = live_range[0][j];
 				}
 			}
+		} else {
+			for (int j = 0; j < live_sz_array[idx]; j++) {
+				if (is_sc_arg(live_range[idx][j])) {
+					unused_arg_regs[unused_arg_regs_sz++] = live_range[idx][j];
+				}
+			}
+		}
 #undef is_sc_arg
 #undef idx
 
-			for (int j = syscall_list[i]; j >= 0; j--) {
-				if (i != syscall_list_sz-1 && j == syscall_list[i+1])
-					break;
+		if (ins_array[syscall_list[i]]->in_loop) {
+			ins_array = realloc(ins_array, (ins_array_sz + 4) * sizeof(MnemNode *));
 
-				live_range[j] = liverange_subtract(live_range[j], &unused_arg_regs[0], &live_sz_array[j], unused_arg_regs_sz);
+			memmove(&ins_array[syscall_list[i] + 2], &ins_array[syscall_list[i]], sizeof(MnemNode *) * (ins_array_sz - syscall_list[i]));
+			ins_array_sz += 2;
+
+			MnemNode *rcx_push = makeMnemNode("\tpush");
+			rcx_push->left = makeMnemNode("rcx");
+			MnemNode *r11_push = makeMnemNode("\tpush");
+			r11_push->left = makeMnemNode("r11");
+
+			ins_array[syscall_list[i]] = rcx_push;
+			ins_array[syscall_list[i]+1] = r11_push;
+
+			for (int j = i; j < syscall_list_sz; j++) {
+				syscall_list[j] += 2;
 			}
+
+			memmove(&ins_array[syscall_list[i] + 3], &ins_array[syscall_list[i] + 1], sizeof(MnemNode *) * (ins_array_sz - (syscall_list[i]+1)));
+			ins_array_sz += 2;
+
+			MnemNode *rcx_pop = makeMnemNode("\tpop");
+			rcx_pop->left = makeMnemNode("rcx");
+			MnemNode *r11_pop = makeMnemNode("\tpop");
+			r11_pop->left = makeMnemNode("r11");
+
+
+			ins_array[syscall_list[i]+1] = r11_pop;
+			ins_array[syscall_list[i]+2] = rcx_pop;
+		}
+
+		for (int j = syscall_list[i]; j >= 0; j--) {
+			if (i != syscall_list_sz-1 && j == syscall_list[i+1])
+				break;
+
+			live_range[j] = liverange_subtract(live_range[j], &unused_arg_regs[0], &live_sz_array[j], unused_arg_regs_sz);
 		}
 	}
 
