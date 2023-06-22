@@ -47,7 +47,7 @@ static int emit_array_assign();
 static int emit_offset_assign();
 static size_t *emit_string_assign();
 static size_t emit_string_arith_binop();
-static Node *emit_func_call();
+static void emit_func_call();
 static void emit_syscall();
 
 static int do_array_arithmetic();
@@ -558,9 +558,7 @@ static void emitf(char *fmt, ...) {
 
 void gen(Node **funcs, size_t n_funcs)
 {
-	//global_functions = funcs;
-
-	vregs_idx = MAX_REGISTER_COUNT; // 0 - MAX_REGISTER_COUNT for real regs, maybe additional type REAL_REG to be recognized in lva()
+	vregs_idx = MAX_REGISTER_COUNT; // 0 - MAX_REGISTER_COUNT for real regs
 
 	entrypoint_defined = 0;
 
@@ -634,27 +632,44 @@ static void emit_syscall(Node **args, size_t n_args)
 	if (n_args < 2) {
 		c_error("Invalid syscall expression. Correct usage is: syscall(NR, arg0, ...)", -1);
 	} else if (n_args > 6) {
-		c_error("Too many arguments for linux syscall.", -1);
+		c_error("Too many arguments for syscall.", -1);
 	}
 
 	char *regs[] = {"rdi", "rsi", "rdx", "r10", "r8", "r9"};
+
+	int func_returns[n_args-1];
+
+	for (int i = 0; i < n_args; i++) {
+		if (args[i]->type == AST_FUNCTION_CALL) {
+			emit_expr(args[i]);
+			if (global_functions[args[i]->global_function_idx]->return_type == TYPE_STRING) {
+				func_returns[i] = vregs_idx-2;
+			} else {
+				func_returns[i] = vregs_idx++;
+			}
+		}
+	}
 
 	for (int i = 0; i < n_args; i++) {
 		if (i == 0) {
 			emit_expr(args[i]);
 			emit("mov rax v%d", vregs_idx++);
 		} else {
-			emit_expr(args[i]);
-			if (args[i]->type == AST_IDENT) {
-				if (args[i]->lvar_valproppair->type == AST_STRING) {
+			if (args[i]->type == AST_FUNCTION_CALL) {
+				emit("mov %s v%d", regs[i-1], func_returns[i]);
+			} else {
+				emit_expr(args[i]);
+				if (args[i]->type == AST_IDENT) {
+					if (args[i]->lvar_valproppair->type == AST_STRING) {
+						emit("mov %s v%d", regs[i-1], vregs_idx-2);
+					} else {
+						emit("mov %s v%d", regs[i-1], vregs_idx++);
+					}
+				} else if (args[i]->type == AST_STRING) {
 					emit("mov %s v%d", regs[i-1], vregs_idx-2);
 				} else {
 					emit("mov %s v%d", regs[i-1], vregs_idx++);
 				}
-			} else if (args[i]->type == AST_STRING) {
-				emit("mov %s v%d", regs[i-1], vregs_idx-2);
-			} else {
-				emit("mov %s v%d", regs[i-1], vregs_idx++);
 			}
 		}
 	}
@@ -1135,7 +1150,7 @@ static void emit_literal(Node *expr)
 			}
 			emit("mov v%d %s", vregs_idx++, expr->slabel);
 			stack_offset += 8;
-			emit("mov dword [rsp+%d] %d", stack_offset, expr->slen);
+			emit("mov qword [rsp+%d] %d", stack_offset, expr->slen);
 			emit("lea v%d [rsp+%d]", vregs_idx++, stack_offset);
 			break;
 		case AST_ARRAY:
@@ -1557,7 +1572,7 @@ static void op(Node *expr)
 	}
 }
 
-static Node *emit_func_call(Node *n)
+static void emit_func_call(Node *n)
 {
 	int idx = n->global_function_idx;
 
@@ -1845,7 +1860,7 @@ static void emit_ret(Node *n)
 				break;
 			case TYPE_STRING:
 				emit("mov rax v%d", vregs_idx-2);
-				emit("mov ebx [v%d]", vregs_idx-1);
+				emit("mov rbx [v%d]", vregs_idx-1);
 				break;
 			case TYPE_ARRAY:
 				emit("mov rax v%d", vregs_idx++);
@@ -2083,6 +2098,8 @@ static InterferenceNode **lva()
 
 					syscall_list = realloc(syscall_list, sizeof(int) * (syscall_list_sz + 1));
 					syscall_list[syscall_list_sz++] = i;
+				} else if (n->type == RET) {
+					live = addToLiveRange(0, live, &live_sz);
 				}
 
 				if (i == live_range_sz-1) {
