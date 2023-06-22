@@ -682,7 +682,7 @@ static void emit_func_prologue(Node *func)
 	emit("mov rbp rsp");
 	emit("\n");
 
-	int end_prologue = func->start_body = ins_array_sz;
+	int end_prologue = ins_array_sz;
 
 	stack_offset = 0;
 	int param_offset = 2;	// to account for pushed return address/pushed rbp
@@ -749,8 +749,11 @@ static void emit_func_prologue(Node *func)
 	emit("\n");
 	emit_noindent("ret_%d:", current_func);
 	emit("add rsp %d", stack_offset);
-	emit("pop rbp");
+
 	func->end_body = ins_array_sz;
+	func->start_body = end_prologue - 1;
+
+	emit("pop rbp");
 	emit("\n");
 
 	if (func->is_fn_entrypoint) {
@@ -778,8 +781,8 @@ static void emit_store_offset(int offset, int type)
 			break;
 		case TYPE_STRING:
 			emit("mov [rsp+%d] v%d", offset-8, vregs_idx-2);
-			emit("mov vd%d [v%d]", vregs_idx-1, vregs_idx-1);
-			emit("mov [rsp+%d] vd%d", offset, vregs_idx-1);
+			emit("mov v%d [v%d]", vregs_idx-1, vregs_idx-1);
+			emit("mov [rsp+%d] v%d", offset, vregs_idx-1);
 			emit("\n");
 			break;
 		default:
@@ -1375,6 +1378,7 @@ static size_t *emit_string_assign(Node *var, Node *string)
 		return pair;
 	} else {
 		size_t len = emit_string_arith_binop(string);
+
 		if (var) {
 			emit_store(var);
 			var->lvar_valproppair->slen = len;
@@ -1398,72 +1402,74 @@ static size_t emit_string_arith_binop(Node *expr)
 	int string2 = vregs_idx-2;
 	int string2_end = vregs_idx-1;
 
-	size_t new_len;
-	if (string1_pair[1] && string2_pair[1]) {
-		new_len = string1_pair[1] + string2_pair[1];
-	} else if (string1_pair[1] && !string2_pair[1]) {
-		new_len = string1_pair[1] + string2_len;
-	} else if (!string1_pair[1] && string2_pair[1]) {
-		new_len = string1_len + string2_pair[1];
-	} else {
-		new_len = string1_len + string2_len;
-	}
+	char *buf1 = makeLabel(0);
+	char *buf2 = makeLabel(0);
 
-	char *new_string = makeLabel(0);
+	char *copyBuf2 = makeLabel(0);
+	char *copyBuf1 = makeLabel(0);
+	char *loop1 = makeLabel(0);
+	char *loop2 = makeLabel(0);
+
+	int idx_reg = vregs_idx++;
+	int idx2_reg = vregs_idx++;
+	int c_reg = vregs_idx++;
+	int buf1_reg = vregs_idx++;
+	int buf2_reg = vregs_idx++;
 
 	emit_noindent("section .bss");
-	emit("%s resb %d", new_string, new_len+1);
+	emit("%s resb %d", buf1, 100/*new_len+1*/);
+	emit("%s resb %d", buf2, 100/*new_len+1*/);
 	emit_noindent("section .text");
 
-	char *loop1_label = makeLabel(1);
-	char *loop2_label = makeLabel(1);
+	emit("mov v%d %s", buf2_reg, buf2);
+	emit("mov v%d 0", idx_reg);
 
-	int acc = vregs_idx++;
-	int single_char = vregs_idx++;
-	int new_string_reg = vregs_idx++;
-
+	emit_noindent("%s:", copyBuf2);
+	emit("mov vb%d [v%d+v%d]", c_reg, string2, idx_reg);
+	emit("mov [v%d+v%d] vb%d", buf2_reg, idx_reg, c_reg);
 	emit("\n");
-	emit("mov v%d 0", acc);
-	emit_noindent("%s:", loop1_label);
-
-	emit("mov vb%d [v%d+v%d]", single_char, string1, acc);
-	emit("mov v%d %s", new_string_reg, new_string);
-	emit("add v%d v%d", new_string_reg, acc);
-	emit("mov [v%d] vb%d", new_string_reg, single_char);
-	emit("inc v%d", acc);
-	emit("cmp v%d %d", acc, string1_len);
-	emit("jl %s", loop1_label);
-
-	string2_len++;
-	emit("\n");
-	emit("mov v%d 0", acc);
-	emit_noindent("%s:", loop2_label);
-
-	emit("mov vb%d [v%d+v%d]", single_char, string2, acc);
-	emit("mov v%d %s", new_string_reg, new_string);
-	emit("add v%d v%d", new_string_reg, acc);
-
-	emit("mov vd%d [v%d]", vregs_idx, string1_end);
-	emit("add v%d v%d", new_string_reg, vregs_idx++);
-
-	emit("mov [v%d] vb%d", new_string_reg, single_char);
-
+	emit("inc v%d", idx_reg);
+	emit("cmp v%d [v%d]", idx_reg, string2_end);
+	emit("jl %s", copyBuf2);
 	emit("\n");
 
-	emit("inc v%d", acc);
-	emit("cmp v%d %d", acc, string2_len);
-	emit("jl %s", loop2_label);
-	string2_len--;
+	emit("mov v%d %s", buf1_reg, buf1);
+	emit("mov v%d 0", idx_reg);
 
-	emit("mov v%d %s", vregs_idx++, new_string);
-	emit("mov vd%d [v%d]", string2_end, string2_end);
-	emit("add [v%d] v%d", string1_end, string2_end);
-
-	emit("mov v%d v%d", vregs_idx++, string1_end);
-
+	emit_noindent("%s:", loop1);
+	emit("mov vb%d [v%d+v%d]", c_reg, string1, idx_reg);
+	emit("mov [v%d+v%d] vb%d", buf1_reg, idx_reg, c_reg);
+	emit("\n");
+	emit("inc v%d", idx_reg);
+	emit("inc qword [v%d]", string2_end);
+	emit("cmp v%d [v%d]", idx_reg, string1_end);
+	emit("jl %s", loop1);
 	emit("\n");
 
-	return new_len;
+	emit("mov v%d %s", buf2_reg, buf2);
+	emit("mov v%d 0", idx2_reg);
+
+	emit_noindent("%s:", loop2);
+	emit("mov vb%d [v%d+v%d]", c_reg, buf2_reg, idx2_reg);
+	emit("mov [v%d+v%d] vb%d", buf1_reg, idx_reg, c_reg);
+	emit("\n");
+	emit("inc v%d", idx_reg);
+	emit("inc v%d", idx2_reg);
+	emit("cmp v%d [v%d]", idx_reg, string2_end);
+	emit("jl %s", loop2);
+
+	emit("mov v%d 0", idx_reg);
+
+	emit_noindent("%s:", copyBuf1);
+	emit("mov vb%d [v%d+v%d]", c_reg, buf1_reg, idx_reg);
+	emit("mov [v%d+v%d] vb%d", buf2_reg, idx_reg, c_reg);
+	emit("\n");
+	emit("inc v%d", idx_reg);
+	emit("cmp v%d [v%d]", idx_reg, string2_end);
+	emit("jl %s", copyBuf1);
+
+	emit("mov v%d %s", vregs_idx++, buf2);
+	emit("mov v%d v%d", vregs_idx++, string2_end);
 }
 
 static void emit_comp_binop(Node *expr)
@@ -1695,7 +1701,6 @@ static void emit_for(Node *n)
 #define for_enum (n->for_enum)
 #define for_it (n->for_iterator)
 
-	int saved_stack = stack_offset;
 	int enum_off;
 
 	int *sizes;
@@ -1741,7 +1746,6 @@ static void emit_for(Node *n)
 		emit("cmp vd%d vd%d", acc, len);
 		emit("jl %s", loop_label);
 
-		stack_offset = saved_stack;
 		return;
 	} else if (for_enum->type == AST_ARRAY) {
 		sizes = getArraySizes(for_enum, for_enum->array_dims);
@@ -1825,7 +1829,6 @@ cont_nostring:
 	emit("cmp vd%d vd%d", acc, len);
 	emit("jl %s", loop_label);
 
-	stack_offset = saved_stack;
 #undef for_enum
 #undef for_it
 }
@@ -2157,6 +2160,8 @@ static InterferenceNode **lva()
 			memmove(&ins_array[func->start_body + preserved_sz[i]], &ins_array[func->start_body], sizeof(MnemNode *) * (ins_array_sz - func->start_body));
 			ins_array_sz += preserved_sz[i];
 
+			func->end_body += preserved_sz[i];
+
 			// make space for inserting pop instructions for retrieve regs at end of function body
 			memmove(&ins_array[func->end_body + preserved_sz[i]], &ins_array[func->end_body], sizeof(MnemNode *) * (ins_array_sz - func->end_body));
 			ins_array_sz += preserved_sz[i];
@@ -2169,7 +2174,7 @@ static InterferenceNode **lva()
 				n = makeMnemNode("\tpush");
 				n->left = makeMnemNode(reg);
 
-				ins_array[func->start_body+j] = n;
+				ins_array[func->start_body+(preserved_sz[i]-j)] = n;
 
 				n = makeMnemNode("\tpop");
 				n->left = makeMnemNode(reg);
