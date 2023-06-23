@@ -761,6 +761,10 @@ static void emit_func_prologue(Node *func)
 
 	ins_array[end_prologue] = sub;
 
+	if (func->return_type == TYPE_VOID) {
+		emit("mov rax 0");
+	}
+
 	emit("\n");
 	emit_noindent("ret_%d:", current_func);
 	emit("add rsp %d", stack_offset);
@@ -1424,6 +1428,8 @@ static size_t emit_string_arith_binop(Node *expr)
 	char *copyBuf1 = makeLabel(0);
 	char *loop1 = makeLabel(0);
 	char *loop2 = makeLabel(0);
+	char *cont_label1 = makeLabel(0);
+	char *cont_label2 = makeLabel(0);
 
 	int idx_reg = vregs_idx++;
 	int idx2_reg = vregs_idx++;
@@ -1439,6 +1445,9 @@ static size_t emit_string_arith_binop(Node *expr)
 	emit("mov v%d %s", buf2_reg, buf2);
 	emit("mov v%d 0", idx_reg);
 
+	emit("cmp qword [v%d] 0", string2_end);
+	emit("je %s", cont_label1);
+
 	emit_noindent("%s:", copyBuf2);
 	emit("mov vb%d [v%d+v%d]", c_reg, string2, idx_reg);
 	emit("mov [v%d+v%d] vb%d", buf2_reg, idx_reg, c_reg);
@@ -1448,9 +1457,13 @@ static size_t emit_string_arith_binop(Node *expr)
 	emit("jl %s", copyBuf2);
 	emit("\n");
 
+	emit_noindent("%s:", cont_label1);
+
 	emit("mov v%d %s", buf1_reg, buf1);
 	emit("mov v%d 0", idx_reg);
 
+	emit("cmp qword [v%d] 0", string1_end);
+	emit("je %s", cont_label2);
 	emit_noindent("%s:", loop1);
 	emit("mov vb%d [v%d+v%d]", c_reg, string1, idx_reg);
 	emit("mov [v%d+v%d] vb%d", buf1_reg, idx_reg, c_reg);
@@ -1460,6 +1473,8 @@ static size_t emit_string_arith_binop(Node *expr)
 	emit("cmp v%d [v%d]", idx_reg, string1_end);
 	emit("jl %s", loop1);
 	emit("\n");
+
+	emit_noindent("%s:", cont_label2);
 
 	emit("mov v%d %s", buf2_reg, buf2);
 	emit("mov v%d 0", idx2_reg);
@@ -1866,6 +1881,8 @@ static void emit_ret(Node *n)
 				emit("mov rax v%d", vregs_idx++);
 				break;
 		}
+	} else {
+		emit("mov rax 0");
 	}
 
 	emit("jmp ret_%d", current_func);
@@ -1977,8 +1994,8 @@ static InterferenceNode **lva()
 {
 	live_range_sz = ins_array_sz;
 
-	int *live_range[live_range_sz];
-	size_t live_sz_array[live_range_sz];
+	int **live_range = malloc(sizeof(int*) * live_range_sz);
+	size_t *live_sz_array = malloc(sizeof(size_t) * live_range_sz);
 
 	int *used_vregs = calloc(vregs_count-MAX_REGISTER_COUNT, sizeof(int));
 	used_vregs_n = 0;
@@ -2085,6 +2102,9 @@ static InterferenceNode **lva()
 						live = addToLiveRange(0, live, &live_sz);
 						live = addToLiveRange(3, live, &live_sz);
 					}
+					if (n->type == CALL) {
+						live_del = addToLiveRange(0, live_del, &live_del_sz);
+					}
 				} else if (n->type == SYSCALL) {
 					live = addToLiveRange(0, live, &live_sz); // rax
 					live = addToLiveRange(5, live, &live_sz); // rdi
@@ -2167,21 +2187,37 @@ static InterferenceNode **lva()
 			free(live);
 		}
 	}
-	
+
 #define func (global_functions[i])
 	for (int i = 0; i < global_function_count; i++) {
 		if (preserved_sz[i] > 0) {
 			ins_array = realloc(ins_array, (ins_array_sz + (2*preserved_sz[i])) * sizeof(MnemNode *));
+			live_range = realloc(live_range, (live_range_sz + (2*preserved_sz[i])) * sizeof(MnemNode *));
+			live_sz_array = realloc(live_sz_array, (live_range_sz + (2*preserved_sz[i])) * sizeof(MnemNode *));
 
 			// make space for inserting push instructions for saving regs at start of function body
 			memmove(&ins_array[func->start_body + preserved_sz[i]], &ins_array[func->start_body], sizeof(MnemNode *) * (ins_array_sz - func->start_body));
+			memmove(&live_range[func->start_body + preserved_sz[i]], &live_range[func->start_body], sizeof(MnemNode *) * (live_range_sz - func->start_body));
+			memmove(&live_sz_array[func->start_body + preserved_sz[i]], &live_sz_array[func->start_body], sizeof(MnemNode *) * (live_range_sz - func->start_body));
 			ins_array_sz += preserved_sz[i];
+			live_range_sz += preserved_sz[i];
 
 			func->end_body += preserved_sz[i];
 
-			// make space for inserting pop instructions for retrieve regs at end of function body
+			// make space for inserting pop instructions for retrieving regs at end of function body
 			memmove(&ins_array[func->end_body + preserved_sz[i]], &ins_array[func->end_body], sizeof(MnemNode *) * (ins_array_sz - func->end_body));
+			memmove(&live_range[func->end_body + preserved_sz[i]], &live_range[func->end_body], sizeof(MnemNode *) * (live_range_sz - func->end_body));
+			memmove(&live_sz_array[func->end_body + preserved_sz[i]], &live_sz_array[func->end_body], sizeof(MnemNode *) * (live_range_sz - func->end_body));
 			ins_array_sz += preserved_sz[i];
+			live_range_sz += preserved_sz[i];
+
+			for (int j = 0; j < syscall_list_sz; j++) {
+				if (syscall_list[j] > func->end_body) {
+					syscall_list[j] += 2 * preserved_sz[i];
+				} else if (syscall_list[j] > func->start_body) {
+					syscall_list[j] += preserved_sz[i];
+				}
+			}
 
 			MnemNode *n;
 			for (int j = 0; j < preserved_sz[i]; j++) {
@@ -2191,12 +2227,12 @@ static InterferenceNode **lva()
 				n = makeMnemNode("\tpush");
 				n->left = makeMnemNode(reg);
 
-				ins_array[func->start_body+(preserved_sz[i]-j)] = n;
+				ins_array[func->start_body+j] = n;
 
 				n = makeMnemNode("\tpop");
 				n->left = makeMnemNode(reg);
 
-				ins_array[func->end_body+j] = n;
+				ins_array[func->end_body + (-1 * (j - preserved_sz[i] + 1))] = n;
 
 				free(reg);
 			}
