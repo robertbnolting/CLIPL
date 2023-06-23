@@ -3009,13 +3009,9 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 				pop(*opstack);
 			}
 
-			// TODO: Type checking here
-			// if (pair->array_dims > expr->ndim_index)
-
-			// TODO: resolve index_values[i] to something other than just int
 			for (int i = 0; i < expr->ndim_index; i++) {
-				if (expr->index_values[i]->ival > pair->array_size[i]-1) {
-					c_error("Array index can't be bigger than array size.", -1);
+				if ((expr->index_values[i]->type == AST_INT) && (expr->index_values[i]->ival > pair->array_size[i]-1)) {
+						c_error("Array index can't be bigger than array size.", -1);
 				}
 			}
 

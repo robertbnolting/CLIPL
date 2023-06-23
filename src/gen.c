@@ -855,8 +855,35 @@ static void emit_store(Node *n)
 					break;
 			}
 			break;
+		case AST_IDX_ARRAY:
+		{
+			ValPropPair *ref_array = n->lvar_valproppair->ref_array;
+			int to_store = vregs_idx++;
+
+			int offset_reg = vregs_idx++;
+			emit("mov vd%d 0", offset_reg);
+			for (int i = 0; i < n->ndim_index; i++) {
+				int sizeacc = 1;
+				for (int j = i+1; j < ref_array->array_dims; j++) {
+					sizeacc *= ref_array->array_size[j];
+				}
+
+				emit_expr(n->index_values[i]);
+
+				emit("lea vd%d [vd%d*%d]", vregs_idx, vregs_idx, sizeacc);
+				emit("add vd%d vd%d", offset_reg, vregs_idx);
+			}
+
+			emit("lea vd%d [vd%d*8]", offset_reg, offset_reg);
+			emit("sub rsp v%d", offset_reg);
+			emit("mov [rsp+%d] v%d", ref_array->loff, to_store);
+			emit("add rsp v%d", offset_reg);
+
+			vregs_idx++;
+		}
+			break;
 		default:
-			printf("Not implemented.\n");
+			c_error("Not implemented.", -1);
 			break;
 	}
 }
@@ -2187,6 +2214,8 @@ static InterferenceNode **lva()
 						if (live_range[i][l] >= MAX_REGISTER_COUNT) {
 							preserved_regs[n->call_to] = realloc(preserved_regs[n->call_to], sizeof(int) * (preserved_sz[n->call_to] + 1));
 							preserved_regs[n->call_to][preserved_sz[n->call_to]++] = live_range[i][l];
+							//preserved_regs[current_func] = realloc(preserved_regs[current_func], sizeof(int) * (preserved_sz[current_func] + 1));
+							//preserved_regs[current_func][preserved_sz[current_func]++] = live_range[i][l];
 						}
 					}
 				} else if (n->type == RET) {
