@@ -497,6 +497,16 @@ static void emitf(char *fmt, ...) {
 					} else {
 						ins->left_spec = next;
 					}
+
+					if (ins->type == CALL) {
+						for (int i = 0; i < global_function_count; i++) {
+							if (!strcmp(global_functions[i]->flabel, &ins->left->mnem[3])) {
+								ins->call_to = i;
+								break;
+							}
+						}
+					}
+
 					if (is_unary_mnemonic(ins->mnem) && ins->left) {
 						ins_array = realloc(ins_array, (ins_array_sz+1) * sizeof(MnemNode *));
 						ins_array[ins_array_sz++] = ins;
@@ -2175,8 +2185,8 @@ static InterferenceNode **lva()
 				} else if (n->type == CALL) {			// inter-procedural preserving of registers
 					for (int l = 0; l < live_sz_array[i]; l++) {
 						if (live_range[i][l] >= MAX_REGISTER_COUNT) {
-							preserved_regs[current_func] = realloc(preserved_regs[current_func], sizeof(int) * (preserved_sz[current_func] + 1));
-							preserved_regs[current_func][preserved_sz[current_func]++] = live_range[i][l];
+							preserved_regs[n->call_to] = realloc(preserved_regs[n->call_to], sizeof(int) * (preserved_sz[n->call_to] + 1));
+							preserved_regs[n->call_to][preserved_sz[n->call_to]++] = live_range[i][l];
 						}
 					}
 				} else if (n->type == RET) {
@@ -2219,6 +2229,11 @@ static InterferenceNode **lva()
 				}
 			}
 
+			for (int j = i+1; j < global_function_count; j++) {
+				global_functions[j]->start_body += 2 * preserved_sz[i];
+				global_functions[j]->end_body += 2 * preserved_sz[i];
+			}
+
 			MnemNode *n;
 			for (int j = 0; j < preserved_sz[i]; j++) {
 				char *reg = malloc(10);
@@ -2231,7 +2246,6 @@ static InterferenceNode **lva()
 
 				n = makeMnemNode("\tpop");
 				n->left = makeMnemNode(reg);
-
 				ins_array[func->end_body + (-1 * (j - preserved_sz[i] + 1))] = n;
 
 				free(reg);
