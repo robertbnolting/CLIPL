@@ -3058,6 +3058,16 @@ static Node *interpret_expr(Node *expr, Stack **opstack, Stack **valstack)
 			interpret_assignment_expr(expr, *opstack, *valstack);
 			interpret_expr(expr->successor, opstack, valstack);
 			break;
+		case AST_ADD_ASSIGN:
+		case AST_SUB_ASSIGN:
+		case AST_MUL_ASSIGN:
+		case AST_DIV_ASSIGN:
+		case AST_MOD_ASSIGN:
+			expr->result_type = expr->left->lvar_valproppair->type;
+
+			interpret_assignment_expr(expr, *opstack, *valstack);
+			interpret_expr(expr->successor, opstack, valstack);
+			break;
 		case AST_FUNCTION_DEF:
 			current_function = expr;
 			interpret_func_def(expr, *opstack, *valstack);

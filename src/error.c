@@ -3,8 +3,6 @@
 
 #include "error.h"
 
-// TODO: more specific error types: indexing error, assignment error, . . .
-
 void c_error(const char *msg, int line)
 {
 	if (line > 0) {

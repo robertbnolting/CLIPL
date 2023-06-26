@@ -45,6 +45,7 @@ static void emit_while();
 static void emit_for();
 static int emit_array_assign();
 static int emit_offset_assign();
+static void emit_int_arith_binop();
 static size_t *emit_string_assign();
 static size_t emit_string_arith_binop();
 static void emit_func_call();
@@ -346,7 +347,7 @@ MnemNode *makeMnemNode(char *mnem)
 					if (buf_sz) {
 						MnemNode *n = makeMnemNode(buf);
 						r->vregs_used = realloc(r->vregs_used, sizeof(MnemNode*) * (r->n_vregs_used+1));
-						r->vregs_used[r->n_vregs_used++] = n; 	// TODO: memcpy
+						r->vregs_used[r->n_vregs_used++] = n;
 						clear(buf);
 						buf_sz = 0;
 					}
@@ -363,7 +364,7 @@ MnemNode *makeMnemNode(char *mnem)
 			if (buf_sz) {
 				MnemNode *n = makeMnemNode(buf);
 				r->vregs_used = realloc(r->vregs_used, sizeof(MnemNode*) * (r->n_vregs_used+1));
-				r->vregs_used[r->n_vregs_used++] = n; 	// TODO: memcpy
+				r->vregs_used[r->n_vregs_used++] = n;
 				clear(buf);
 				buf_sz = 0;
 			}
@@ -1019,7 +1020,6 @@ static int **getArrayMembers(Node *array, size_t *n_members, int total_size, int
 		} else if (pair->type == AST_INT) {
 			array_size = 1;
 			array_elems = malloc(sizeof(Node *));
-			// TODO: will never work with changing values of the variable
 			array_elems[0] = makeNode(&(Node){AST_INT, .ival=pair->ival});
 			array_dims = 1;
 		} else {
@@ -1260,7 +1260,7 @@ static void emit_array_arg(Node *n)
 
 static void emit_idx_array(Node *n)
 {
-	ValPropPair *ref_array = n->lvar_valproppair->ref_array; // TODO: check in parse.c if {AST_IDX_ARRAY}->lvar_valproppair is necessary
+	ValPropPair *ref_array = n->lvar_valproppair->ref_array;
 
 	int offset_reg = vregs_idx++;
 	emit("mov vd%d 0", offset_reg);
@@ -1359,6 +1359,7 @@ static void emit_int_arith_binop(Node *expr)
 	switch (expr->type)
 	{
 		case AST_ADD:
+		case AST_ADD_ASSIGN:
 			emit_expr(expr->left);
 			left_idx = vregs_idx++;
 			emit_expr(expr->right);
@@ -1367,6 +1368,7 @@ static void emit_int_arith_binop(Node *expr)
 			emit("add vd%d vd%d", right_idx, left_idx);
 			break;
 		case AST_SUB:
+		case AST_SUB_ASSIGN:
 			emit_expr(expr->left);
 			left_idx = vregs_idx++;
 			emit_expr(expr->right);
@@ -1376,6 +1378,7 @@ static void emit_int_arith_binop(Node *expr)
 			emit("mov vd%d vd%d", right_idx, left_idx);
 			break;
 		case AST_MUL:
+		case AST_MUL_ASSIGN:
 			emit_expr(expr->left);
 			left_idx = vregs_idx++;
 			emit_expr(expr->right);
@@ -1384,6 +1387,7 @@ static void emit_int_arith_binop(Node *expr)
 			emit("imul vd%d vd%d", right_idx, left_idx);
 			break;
 		case AST_DIV:
+		case AST_DIV_ASSIGN:
 			emit_expr(expr->left);
 			left_idx = vregs_idx++;
 			emit_expr(expr->right);
@@ -1398,6 +1402,7 @@ static void emit_int_arith_binop(Node *expr)
 			emit("mov vd%d vd%d", right_idx, left_idx);
 			break;
 		case AST_MOD:
+		case AST_MOD_ASSIGN:
 			emit_expr(expr->left);
 			left_idx = vregs_idx++;
 			emit_expr(expr->right);
@@ -1610,6 +1615,20 @@ static void op(Node *expr)
 			emit_string_arith_binop(expr);
 		}
 		break;
+	case AST_ADD_ASSIGN:
+	case AST_SUB_ASSIGN:
+	case AST_MUL_ASSIGN:
+	case AST_DIV_ASSIGN:
+	case AST_MOD_ASSIGN:
+		if (expr->result_type == TYPE_INT) {
+			emit_int_arith_binop(expr);
+		}
+		if (expr->result_type == TYPE_STRING) {
+			emit_string_arith_binop(expr);
+		}
+
+		emit_store(expr->left);
+		break;
 	case AST_GT:
 	case AST_LT:
 	case AST_EQ:
@@ -1674,7 +1693,6 @@ static void emit_func_call(Node *n)
 				emit_expr(n->callargs[i]);
 			}
 
-			// TODO: propagate string values (valproppair) from callargs to func params
 			switch (arg_type)
 			{
 			case AST_INT:
