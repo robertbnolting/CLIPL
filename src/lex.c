@@ -401,7 +401,7 @@ static char *read_import_directive()
 		char *filename = NULL;
 		size_t filename_len = 0;
 		char *filepath = NULL;
-		while (is_letter(current) || is_digit(current) || is_underscore(current)) {
+		while (is_letter(current) || is_digit(current) || is_underscore(current) || current == '.') {
 			filename = realloc(filename, filename_len+1);
 			filename[filename_len] = current;
 			filename_len++;

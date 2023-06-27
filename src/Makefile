@@ -2,10 +2,10 @@ CC = gcc
 
 CFLAGS  = -g3 -Wall
 
-default: compile
+default: clipl
 
-compile: main.o lex.o parse.o readfile.o error.o gen.o
-	$(CC) $(CFLAGS) -o compile main.o lex.o parse.o readfile.o error.o gen.o
+clipl: main.o lex.o parse.o readfile.o error.o gen.o
+	$(CC) $(CFLAGS) -o clipl main.o lex.o parse.o readfile.o error.o gen.o
 	rm *.o
 
 main.o: main.c readfile.h lex.h parse.h error.h gen.o
