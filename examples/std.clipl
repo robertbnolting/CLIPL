@@ -115,3 +115,13 @@ fn printInt(int n) -> void
 {
 	printString(intToStr(n));
 }
+
+fn openFile(string filename, int mode) -> int
+{
+	syscall(2, filename, mode);
+}
+
+fn writeToFile(int fd, string text) -> void
+{
+	syscall(1, fd, text, len(text));
+}

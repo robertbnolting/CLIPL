@@ -2399,6 +2399,8 @@ static void interpret_assignment_expr(Node *expr, Stack *opstack, Stack *valstac
 			}
 			break;
 			case AST_FUNCTION_CALL:
+				if (rhs->global_function_idx == -2)
+					break;
 #define func (global_functions[rhs->global_function_idx])
 				if (pair->type == TYPE_ARRAY) {
 					if (func->ret_array_dims != pair->array_dims) {

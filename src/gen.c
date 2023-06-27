@@ -688,6 +688,8 @@ static void emit_syscall(Node **args, size_t n_args)
 
 	emit("syscall");
 	emit("\n");
+
+	emit("mov v%d rax", vregs_idx);
 }
 
 static void emit_func_prologue(Node *func)
