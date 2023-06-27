@@ -1,0 +1,66 @@
+!import std.clipl
+
+fn writeTo(string filename, string msg) -> int
+{
+	int success;
+	int file_descriptor = openFile(filename, 2);
+
+	if (file_descriptor > 0) {
+		success = writeToFile(file_descriptor, msg);
+	}
+
+	return success;
+}
+
+# 'entry' is used to mark any function as the program entrypoint
+entry fn main() -> void
+{
+	int num = 1 + 5 * (10 / 2);
+
+	printInt(num);
+
+	printString(", ");
+
+	# string concatenation works most of the time
+	string str1 = "Hello ";
+	string str2 = "World";
+	string msg = str1 + str2 + "!";
+
+	printString(msg);
+
+	bool b = true;
+
+	int counter = 0;
+
+	while (counter < 10) {
+		counter += 1;
+	}
+
+	int success = writeTo("test.txt", msg);
+
+	# array concatenation works most of the time
+	int array[10] = [0, 1, 2, 2, 4, 5] + [6, 7, 8, 9];
+
+	if (array[3] != 3) {
+		array[3] = 3;
+	}
+
+	int counter1 = 0;
+	int counter2 = 0;
+
+	for (int i : array) {
+		counter1 += i;
+	}
+
+	for (int j : range(0, 10)) {
+		counter2 += i;
+	}
+
+	printString(", ");
+
+	if (counter1 != counter2) {
+		printString("Success!");
+	} else {
+		printString("Failure!");
+	}
+}

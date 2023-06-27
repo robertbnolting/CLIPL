@@ -31,6 +31,19 @@ fn getDigits(int n) -> int
 	return 10;
 }
 
+fn range(int start, int end) -> int[]
+{
+	int arr[10] = [];
+
+	while (end != 0) {
+		arr = arr + start;
+		start = start + 1;
+		end = end - 1;
+	}
+
+	return arr;
+}
+
 fn reverseString(string s) -> string
 {
 	string ret = "";
@@ -118,10 +131,14 @@ fn printInt(int n) -> void
 
 fn openFile(string filename, int mode) -> int
 {
-	syscall(2, filename, mode);
+	int fd = syscall(2, filename, mode);
+
+	return fd;
 }
 
-fn writeToFile(int fd, string text) -> void
+fn writeToFile(int fd, string text) -> int
 {
-	syscall(1, fd, text, len(text));
+	int success = syscall(1, fd, text, len(text));
+
+	return success;
 }
