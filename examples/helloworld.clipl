@@ -1,0 +1,6 @@
+!import std.clipl
+
+entry fn main() -> void
+{
+	printString("Hello World!");
+}

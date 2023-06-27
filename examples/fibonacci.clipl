@@ -1,0 +1,25 @@
+!import std.clipl
+
+fn fib(int n) -> int
+{
+	if (n == 0) {
+		return 0;
+	} else {
+		if (n == 1) {
+			return 1;
+		} else {
+			return fib(n-1) + fib(n-2);
+		}
+	}
+}
+
+entry fn main() -> void
+{
+	int n = 20;
+	int i = 0;
+	while (i < n) {
+		printInt(fib(i));
+		printString(", ");
+		i = i + 1;
+	}
+}

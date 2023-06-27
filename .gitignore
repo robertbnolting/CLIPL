@@ -1,8 +1,8 @@
-compile
+clipl
 a.out
 input*
-example_input
 test*
+table_generator.py
 *.s
 *.asm
 *.sh
