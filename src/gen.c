@@ -7,8 +7,6 @@
 #include "gen.h"
 #include "error.h"
 
-#define PSEUDO_ASM_OUT 0
-
 #define MAX_REGISTER_COUNT 14
 
 static char *Q_REGS[] = {"rax", "rbx", "rcx", "rdx", "rsi", "rdi",
@@ -581,9 +579,11 @@ void gen(Node **funcs, size_t n_funcs)
 		c_error("No entrypoint was specified. Use keyword 'entry' in front of function to mark it as the entrypoint.", -1);
 	}
 
-#if !PSEUDO_ASM_OUT
-	gen_nasm();
-#endif
+	if (!ps_out) {
+		gen_nasm();
+	} else if (live_out) {
+		d_warning("Collision between -dps and -dlive. Liveness information won't be shown.");
+	}
 
 	for (int i = 0; i < ins_array_sz; i++) {
 		char tmpbuf[128] = {0};
@@ -626,6 +626,7 @@ void gen(Node **funcs, size_t n_funcs)
 	}
 
 	fprintf(outputfp, outputbuf);
+	fclose(outputfp);
 }
 
 static void push(char *reg)
@@ -2407,39 +2408,39 @@ static InterferenceNode **lva()
 		}
 #undef InterNode
 
-#if 1
-		printf("LIVE at %d: ", i);
-		for (int j = 0; j < live_sz; j++) {
-			if (live[j] >= MAX_REGISTER_COUNT) {
-				printf("%d, ", live[j]);
-			} else {
-				printf("%s, ", Q_REGS[live[j]]);
-			}
-		}
-		printf("\n---\n");
-#endif
-	}
-
-#if 1
-	for (int i = 0; i < vregs_count; i++) {
-		if (i >= MAX_REGISTER_COUNT) {
-			printf("Neighbors of v%d:\n", i);
-		} else {
-			printf("Neighbors of %s:\n", Q_REGS[i]);
-		}
-		if (interference_graph[i]) {
-			for (int j = 0; j < interference_graph[i]->neighbor_count; j++) {
-				if (interference_graph[i]->neighbors[j]->idx >= MAX_REGISTER_COUNT) {
-					printf("\tv%d\n", interference_graph[i]->neighbors[j]->idx);
+		if (live_out) {
+			printf("LIVE at %d: ", i);
+			for (int j = 0; j < live_sz; j++) {
+				if (live[j] >= MAX_REGISTER_COUNT) {
+					printf("%d, ", live[j]);
 				} else {
-					printf("\t%s\n", Q_REGS[interference_graph[i]->neighbors[j]->idx]);
+					printf("%s, ", Q_REGS[live[j]]);
 				}
 			}
-		} else {
-			printf("v%d is unused.\n", i);
+			printf("\n---\n");
 		}
 	}
-#endif
+
+	if (live_out) {
+		for (int i = 0; i < vregs_count; i++) {
+			if (i >= MAX_REGISTER_COUNT) {
+				printf("Neighbors of v%d:\n", i);
+			} else {
+				printf("Neighbors of %s:\n", Q_REGS[i]);
+			}
+			if (interference_graph[i]) {
+				for (int j = 0; j < interference_graph[i]->neighbor_count; j++) {
+					if (interference_graph[i]->neighbors[j]->idx >= MAX_REGISTER_COUNT) {
+						printf("\tv%d\n", interference_graph[i]->neighbors[j]->idx);
+					} else {
+						printf("\t%s\n", Q_REGS[interference_graph[i]->neighbors[j]->idx]);
+					}
+				}
+			} else {
+				printf("v%d is unused.\n", i);
+			}
+		}
+	}
 
 	return interference_graph;
 }
@@ -2506,13 +2507,13 @@ static void color(InterferenceNode **g)
 		highest_sat->color = lowest_color+1;
 		colored_nodes++;
 	}
-#if 1
-	for (int i = 0; i < vregs_count; i++) {
-		if (g[i]) {
-			printf("v%d: %s\n", g[i]->idx, Q_REGS[g[i]->color]);
+	if (live_out) {
+		for (int i = 0; i < vregs_count; i++) {
+			if (g[i]) {
+				printf("v%d: %s\n", g[i]->idx, Q_REGS[g[i]->color]);
+			}
 		}
 	}
-#endif
 }
 
 static char *assign_color(char *mnem, InterferenceNode **g)

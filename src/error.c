@@ -3,6 +3,12 @@
 
 #include "error.h"
 
+void g_error(const char *msg)
+{
+	printf("\x1b[91mError\x1b[0m: %s\n", msg);
+	exit(1);
+}
+
 void c_error(const char *msg, int line)
 {
 	if (line > 0) {
@@ -21,6 +27,11 @@ void c_warning(const char *msg, int line)
 	} else {
 		printf("\x1b[93mCompile warning\x1b[0m: %s\n", msg);
 	}
+}
+
+void d_warning(const char *msg)
+{
+	printf("\x1b[32mDebug warning\x1b[0m: %s\n", msg);
 }
 
 void token_error(const char *msg, int line)

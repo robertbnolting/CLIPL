@@ -230,3 +230,9 @@ Node *makeNode();
 
 extern Node **global_functions;
 extern size_t global_function_count;
+
+extern int ast_out;
+extern int cfg_out;
+extern int sym_out;
+extern int live_out;
+extern int ps_out;

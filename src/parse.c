@@ -12,10 +12,6 @@
 
 #define DYNAMIC_ARRAYS_ENABLED 0
 
-#define AST_OUTPUT 0
-#define CFG_OUTPUT 0
-#define SYM_OUTPUT 0
-
 static int pos;
 
 #define curr()	(&Token_stream[pos])
@@ -101,7 +97,7 @@ size_t global_function_count;
 static Node **global_records;
 static size_t global_record_count;
 
-void parser_init()
+void parser_init(char *outputfile_name)
 {
 	pos = 0;
 
@@ -140,27 +136,30 @@ void parser_init()
 
 	Node **cfg_array = thread_ast();
 
-#if CFG_OUTPUT
-	for (int i = 0; i < global_function_count; i++) {
-		printCFG(cfg_array[i]);
-		printf("\n-------------\n");
+	if (cfg_out) {
+		for (int i = 0; i < global_function_count; i++) {
+			printCFG(cfg_array[i]);
+			printf("\n-------------\n");
+		}
 	}
-#endif
 
-#if AST_OUTPUT
-	for (int i = 0; i < array_len; i++) {
-		traverse(node_array[i]);
-		free(node_array[i]);
-		printf("\n\n");
+	if (ast_out) {
+		for (int i = 0; i < array_len; i++) {
+			traverse(node_array[i]);
+			free(node_array[i]);
+			printf("\n\n");
+		}
+		free(node_array);
 	}
-	free(node_array);
-#endif
 
 	for (int i = 0; i < global_function_count; i++) {
 		sym_interpret(cfg_array[i]);
 	}
 
-	FILE *fp = fopen("test.s", "w");
+	char *outputfile = malloc(strlen(outputfile_name) + 2);
+	strcpy(outputfile, outputfile_name);
+	strcat(outputfile, ".s");
+	FILE *fp = fopen(outputfile, "w");
 	set_output_file(fp);
 	gen(global_functions, global_function_count);
 }
@@ -2069,80 +2068,83 @@ static void sym_interpret(Node *cfg)
 
 	interpret_expr(cfg, &opstack, &valstack);
 
-#if SYM_OUTPUT
-	for (int i = 0; i < valstack->size; i++) {
+	if (sym_out) {
+		for (int i = 0; i < valstack->size; i++) {
 #define current ((ValPropPair *)valstack->start[i])
-		if (current->type != TYPE_RECORD && current->type != TYPE_ARRAY) {
-			printf("NAME: %s | STATUS: %s | TYPE: %s | VALUE: ", current->var_name,
-				current->status ? ( (current->status == 1 || current->status == -1) ? "Initialized" : "Maybe initialized") 
-				: "Uninitialized", datatypeToString(current->type));
-			if (current->status && current->status > 0) {
-				switch (current->type)
-				{
-					case TYPE_INT:
-						printf("%d\n", current->ival);
-						break;
-					case TYPE_STRING:
-						printf("%s\n", current->sval);
-						break;
-					case TYPE_FLOAT:
-						printf("%f\n", current->fval);
-						break;
-					case TYPE_BOOL:
-						printf("%s\n", current->bval ? "true" : "false");
-						break;
-				}
-			} else if (current->status < 0) {
-				printf("Value unknown.\n");
-			} else {
-				printf("/\n");
-			}
-		} else if (current->type == TYPE_ARRAY) {
-			printf("NAME: %s | STATUS: %s | TYPE: %d-D %s-array | SIZE: ", current->var_name,
-				current->status ? ( (current->status == 1 || current->status == -1) ? "Initialized" : "Maybe initialized") : "Uninitialized",
-				current->array_dims, datatypeToString(current->array_type));
-				for (int j = 0; j < current->array_dims; j++) {
-					if (j == current->array_dims-1) {
-						printf("%d", current->array_size[j]);
-					} else {
-						printf("%dx", current->array_size[j]);
-					}
-				}
-			printf("\n");
-		} else if (current->type == TYPE_RECORD) {
-			printf("NAME: %s | FIELDS:\n", current->var_name);
-			for (int j = 0; j < current->record_vec.size; j++) {
-#define current_field ((ValPropPair *) current->record_vec.array[j])
-				printf("\tNAME: %s | STATUS: %s | TYPE: %s | VALUE: ", current_field->var_name,
-					current_field->status ? (current_field->status == 1 ? "Initialized" : "Maybe initialized") : "Uninitialized", 
-					datatypeToString(current_field->type));
-
-				if (current_field->status) {
-					switch (current_field->type)
+			if (current->type != TYPE_RECORD && current->type != TYPE_ARRAY) {
+				printf("NAME: %s | STATUS: %s | TYPE: %s | VALUE: ", current->var_name,
+					current->status ? ( (current->status == 1 || current->status == -1) ? "Initialized" : "Maybe initialized") 
+					: "Uninitialized", datatypeToString(current->type));
+				if (current->status && current->status > 0) {
+					switch (current->type)
 					{
 						case TYPE_INT:
-							printf("%d\n", current_field->ival);
+							if (current->ival)
+								printf("%d\n", current->ival);
 							break;
 						case TYPE_STRING:
-							printf("%s\n", current_field->sval);
+							if (current->sval)
+								printf("%s\n", current->sval);
 							break;
 						case TYPE_FLOAT:
-							printf("%f\n", current_field->fval);
+							if (current->fval)
+								printf("%f\n", current->fval);
 							break;
 						case TYPE_BOOL:
-							printf("%s\n", current_field->bval ? "true" : "false");
+							if (current->bval)
+								printf("%s\n", current->bval ? "true" : "false");
 							break;
 					}
+				} else if (current->status < 0) {
+					printf("Value unknown.\n");
 				} else {
 					printf("/\n");
 				}
-			}
-		}	
-	}
+			} else if (current->type == TYPE_ARRAY) {
+				printf("NAME: %s | STATUS: %s | TYPE: %d-D %s-array | SIZE: ", current->var_name,
+					current->status ? ( (current->status == 1 || current->status == -1) ? "Initialized" : "Maybe initialized") : "Uninitialized",
+					current->array_dims, datatypeToString(current->array_type));
+					for (int j = 0; j < current->array_dims; j++) {
+						if (j == current->array_dims-1) {
+							printf("%d", current->array_size[j]);
+						} else {
+							printf("%dx", current->array_size[j]);
+						}
+					}
+				printf("\n");
+			} else if (current->type == TYPE_RECORD) {
+				printf("NAME: %s | FIELDS:\n", current->var_name);
+				for (int j = 0; j < current->record_vec.size; j++) {
+#define current_field ((ValPropPair *) current->record_vec.array[j])
+					printf("\tNAME: %s | STATUS: %s | TYPE: %s | VALUE: ", current_field->var_name,
+						current_field->status ? (current_field->status == 1 ? "Initialized" : "Maybe initialized") : "Uninitialized", 
+						datatypeToString(current_field->type));
+
+					if (current_field->status) {
+						switch (current_field->type)
+						{
+							case TYPE_INT:
+								printf("%d\n", current_field->ival);
+								break;
+							case TYPE_STRING:
+								printf("%s\n", current_field->sval);
+								break;
+							case TYPE_FLOAT:
+								printf("%f\n", current_field->fval);
+								break;
+							case TYPE_BOOL:
+								printf("%s\n", current_field->bval ? "true" : "false");
+								break;
+						}
+					} else {
+						printf("/\n");
+					}
+				}
+			}	
+		}
 #undef current_field
 #undef current
-#endif
-
+	}
 	/*
 	*ops = *((Node **) opstack->start);
 	*vals = *((ValPropPair **) valstack->start);
