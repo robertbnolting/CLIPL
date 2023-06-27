@@ -53,7 +53,7 @@ fn writeTo(string filename, string msg) -> int
 # 'entry' is used to mark any function as the program entrypoint
 entry fn main() -> void 
 {
-	int num = 1 + 5 * (10 / 2);
+	int num = 5 * (10 / 2);
 
 	printInt(num);
 
@@ -104,6 +104,7 @@ entry fn main() -> void
 }
 
 ```
+Compiling with ```clipl example.clipl``` and running ```./example``` will print ```25, Hello World!, Success!```.
 
 ## Command-Line Options
 ```
