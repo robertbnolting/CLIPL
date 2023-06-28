@@ -4,10 +4,10 @@
 CLIPL is an imperative, compiled custom programming language with similar syntax and functionality
 as C.
 
-It lets you define variables and functions, can perform arithemtic operations on several data types,
+It lets you define variables and functions, can perform arithmetic operations on several data types,
 currently including int, string and bool and even has built-in linux syscall support.
 
-The compiler is quite buggy and will **probably crash** often, however the provided examples have been tested and are working.
+The compiler is quite buggy and will **probably crash** often, however, the provided examples have been tested and are working.
 Some features that are available in the lexer, like floats, records, etc. are **not implemented** in later compiler stages,
 so they won't work.
 
